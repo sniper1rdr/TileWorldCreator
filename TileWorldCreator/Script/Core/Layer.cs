@@ -11,13 +11,27 @@ namespace TileWorldCreator
     [ExecuteAlways]
     public class Layer : MonoBehaviour
     {
-        [SerializeField] private string layerName = "Ground_01";
-        [SerializeField] private Grid grid;
-        [SerializeField] private List<Tile> tiles = new List<Tile>();
+        [SerializeField]
+        private string layerName = "Ground_01";
+
+        [SerializeField]
+        private Grid grid;
+
+        [SerializeField]
+        private List<GameObject> tiles =
+            new List<GameObject>();
+
 
         public string LayerName => layerName;
+
         public Grid Grid => grid;
-        public List<Tile> Tiles => tiles;
+
+        public List<GameObject> Tiles => tiles;
+
+
+        // =====================================================
+        // INITIALIZATION
+        // =====================================================
 
         public void Initialize(string name)
         {
@@ -25,239 +39,528 @@ namespace TileWorldCreator
             EnsureGrid();
         }
 
+
         public Grid EnsureGrid()
         {
             if (grid == null)
             {
-                Level level = GetComponentInParent<Level>();
+                Level level =
+                    GetComponentInParent<Level>();
+
                 if (level != null)
                 {
                     grid = level.GetGrid();
                 }
                 else
                 {
-                    WorldRoot worldRoot = GetComponentInParent<WorldRoot>();
+                    WorldRoot worldRoot =
+                        GetComponentInParent<WorldRoot>();
+
                     if (worldRoot != null)
                     {
-                        grid = worldRoot.EnsureGrid();
+                        grid =
+                            worldRoot.EnsureGrid();
                     }
                 }
 
                 if (grid == null)
                 {
-                    grid = FindObjectOfType<Grid>();
+                    grid =
+                        FindObjectOfType<Grid>();
                 }
             }
 
             return grid;
         }
 
+
         public void SetGrid(Grid newGrid)
         {
             grid = newGrid;
         }
 
-        // CreateTile — инстанцирует префаб прямо в слой
-        public GameObject CreateTile(Vector3Int cellPosition, string tileType = "Default", GameObject prefab = null)
+
+        // =====================================================
+        // CREATE TILE
+        // =====================================================
+
+        public GameObject CreateTile(
+            Vector3Int cellPosition,
+            string tileType = "Default",
+            GameObject prefab = null)
         {
             if (grid == null)
             {
                 EnsureGrid();
+
                 if (grid == null)
                 {
-                    Debug.LogError($"Cannot create tile: No Grid found for Layer '{layerName}'");
+                    Debug.LogError(
+                        $"Cannot create tile: No Grid found for Layer '{layerName}'"
+                    );
+
                     return null;
                 }
             }
 
-            // Проверяем занята ли ячейка ТОЛЬКО В ЭТОМ СЛОЕ
+
             if (IsCellOccupiedInThisLayer(cellPosition))
             {
-                Debug.Log($"Cell {cellPosition.x}, {cellPosition.z} is already occupied in layer '{layerName}'!");
                 return null;
             }
 
-            // Получаем позицию от Grid
-            Vector3 gridPosition = grid.GetCellCenterWorld(cellPosition);
 
-            // Вычисляем мировую позицию для уровня (y = height of layer)
-            Vector3 worldPos = new Vector3(gridPosition.x, transform.position.y, gridPosition.z);
+            Vector3 worldPos =
+                GetTileWorldPosition(cellPosition);
+
 
             GameObject visual = null;
+
+
+            // ==========================================
+            // PREFAB TILE
+            // ==========================================
 
             if (prefab != null)
             {
 #if UNITY_EDITOR
-                // В редакторе сохраняем связь с исходным префабом
-                visual = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-                if (visual == null)
-                    visual = Object.Instantiate(prefab);
-                Undo.RegisterCreatedObjectUndo(visual, "Instantiate Tile");
-#else
-                visual = Object.Instantiate(prefab);
-#endif
-                visual.transform.SetParent(transform, false);
-                visual.transform.position = worldPos;
-                visual.name = $"{prefab.name}_{cellPosition.x}_{cellPosition.z}";
-            }
-            else
-            {
-                // Создаём пустой GameObject если префаба нет
-                visual = new GameObject($"Tile_{cellPosition.x}_{cellPosition.z}");
-#if UNITY_EDITOR
+
                 if (!Application.isPlaying)
-                    Undo.RegisterCreatedObjectUndo(visual, "Create Empty Tile");
+                {
+                    visual =
+                        PrefabUtility.InstantiatePrefab(prefab)
+                        as GameObject;
+                }
+
+                if (visual == null)
+                {
+                    visual =
+                        Object.Instantiate(prefab);
+                }
+
+                if (!Application.isPlaying)
+                {
+                    Undo.RegisterCreatedObjectUndo(
+                        visual,
+                        "Instantiate Tile"
+                    );
+                }
+
+#else
+
+                visual =
+                    Object.Instantiate(prefab);
+
 #endif
-                visual.transform.SetParent(transform, false);
-                visual.transform.position = worldPos;
+
+                visual.transform.SetParent(
+                    transform,
+                    true
+                );
+
+                visual.transform.position =
+                    worldPos;
+
+                visual.name =
+                    $"{prefab.name}_{cellPosition.x}_{cellPosition.z}";
             }
 
-            // Добавляем Tile компонент только в редакторе для отслеживания
-#if UNITY_EDITOR
-            if (!Application.isPlaying)
+
+            // ==========================================
+            // EMPTY TILE
+            // ==========================================
+
+            else
             {
-                Tile tile = visual.AddComponent<Tile>();
-                tile.Initialize(cellPosition, tileType);
-                tiles.Add(tile);
-            }
+                visual =
+                    new GameObject(
+                        $"Tile_{cellPosition.x}_{cellPosition.z}"
+                    );
+
+#if UNITY_EDITOR
+
+                if (!Application.isPlaying)
+                {
+                    Undo.RegisterCreatedObjectUndo(
+                        visual,
+                        "Create Empty Tile"
+                    );
+                }
+
 #endif
+
+                visual.transform.SetParent(
+                    transform,
+                    true
+                );
+
+                visual.transform.position =
+                    worldPos;
+            }
+
+
+            if (!tiles.Contains(visual))
+            {
+                tiles.Add(visual);
+            }
+
 
             return visual;
         }
 
-        public Vector3Int WorldToCell(Vector3 worldPosition)
+
+        // =====================================================
+        // REPLACE TILE
+        // =====================================================
+
+        public GameObject ReplaceTile(
+            Vector3Int cellPosition,
+            GameObject newPrefab,
+            float rotation = 0f)
         {
-            if (grid == null) EnsureGrid();
+            if (newPrefab == null)
+                return null;
+
+
+            GameObject oldTile =
+                GetTileAt(cellPosition);
+
+            if (oldTile == null)
+                return null;
+
+
+            Vector3 worldPosition =
+                GetTileWorldPosition(cellPosition);
+
+
+            GameObject newTile = null;
+
+
+#if UNITY_EDITOR
+
+            if (!Application.isPlaying)
+            {
+                newTile =
+                    PrefabUtility.InstantiatePrefab(newPrefab)
+                    as GameObject;
+            }
+
+            if (newTile == null)
+            {
+                newTile =
+                    Object.Instantiate(newPrefab);
+            }
+
+            if (!Application.isPlaying)
+            {
+                Undo.RegisterCreatedObjectUndo(
+                    newTile,
+                    "Replace Auto Tile"
+                );
+            }
+
+#else
+
+            newTile =
+                Object.Instantiate(newPrefab);
+
+#endif
+
+
+            newTile.transform.SetParent(
+                transform,
+                true
+            );
+
+            newTile.transform.position =
+                worldPosition;
+
+            newTile.transform.rotation =
+                Quaternion.Euler(
+                    0f,
+                    rotation,
+                    0f
+                );
+
+
+            newTile.name =
+                $"{newPrefab.name}_{cellPosition.x}_{cellPosition.z}";
+
+
+            int index =
+                tiles.IndexOf(oldTile);
+
+            if (index >= 0)
+            {
+                tiles[index] = newTile;
+            }
+            else
+            {
+                tiles.Add(newTile);
+            }
+
+
+#if UNITY_EDITOR
+
+            if (!Application.isPlaying)
+            {
+                Undo.DestroyObjectImmediate(oldTile);
+            }
+            else
+            {
+                Destroy(oldTile);
+            }
+
+#else
+
+            Destroy(oldTile);
+
+#endif
+
+
+            return newTile;
+        }
+
+
+        // =====================================================
+        // REMOVE TILE
+        // =====================================================
+
+        public bool RemoveTile(
+            Vector3Int cellPosition)
+        {
+            GameObject tile =
+                GetTileAt(cellPosition);
+
+            if (tile == null)
+                return false;
+
+
+            tiles.Remove(tile);
+
+
+#if UNITY_EDITOR
+
+            if (!Application.isPlaying)
+            {
+                Undo.DestroyObjectImmediate(tile);
+            }
+            else
+            {
+                Destroy(tile);
+            }
+
+#else
+
+            Destroy(tile);
+
+#endif
+
+
+            return true;
+        }
+
+
+        // =====================================================
+        // GRID
+        // =====================================================
+
+        public Vector3Int WorldToCell(
+            Vector3 worldPosition)
+        {
+            if (grid == null)
+                EnsureGrid();
+
 
             if (grid != null)
             {
-                Vector3Int cellPos = grid.WorldToCell(worldPosition);
+                Vector3Int cellPos =
+                    grid.WorldToCell(worldPosition);
+
                 cellPos.y = 0;
+
                 return cellPos;
             }
+
             return Vector3Int.zero;
         }
 
-        public Vector3 GetCellCenterWorld(Vector3Int cellPosition)
+
+        public Vector3 GetCellCenterWorld(
+            Vector3Int cellPosition)
         {
-            if (grid == null) EnsureGrid();
+            if (grid == null)
+                EnsureGrid();
+
 
             if (grid != null)
             {
-                Vector3 worldPos = grid.GetCellCenterWorld(cellPosition);
-                return new Vector3(worldPos.x, 0f, worldPos.z);
+                Vector3 worldPos =
+                    grid.GetCellCenterWorld(cellPosition);
+
+                worldPos.y =
+                    transform.position.y;
+
+                return worldPos;
             }
+
             return Vector3.zero;
         }
 
-        public Vector3 GetTileWorldPosition(Vector3Int cellPosition)
+
+        public Vector3 GetTileWorldPosition(
+            Vector3Int cellPosition)
         {
-            Vector3 localPos = GetCellCenterWorld(cellPosition);
-            Vector3 worldPos = transform.TransformPoint(localPos);
-            worldPos.y = transform.position.y;
+            if (grid == null)
+                EnsureGrid();
+
+
+            if (grid == null)
+                return Vector3.zero;
+
+
+            Vector3 worldPos =
+                grid.GetCellCenterWorld(cellPosition);
+
+            worldPos.y =
+                transform.position.y;
+
             return worldPos;
         }
 
+
+        // =====================================================
+        // CLEAR
+        // =====================================================
+
         public void ClearAllTiles()
         {
-            foreach (Tile tile in tiles)
+            for (int i = tiles.Count - 1; i >= 0; i--)
             {
-                if (tile != null)
-                {
+                GameObject tile = tiles[i];
+
+                if (tile == null)
+                    continue;
+
+
 #if UNITY_EDITOR
-                    if (!Application.isPlaying)
-                        UnityEditor.Undo.DestroyObjectImmediate(tile.gameObject);
-                    else
-#endif
-                        Destroy(tile.gameObject);
+
+                if (!Application.isPlaying)
+                {
+                    Undo.DestroyObjectImmediate(tile);
                 }
+                else
+                {
+                    Destroy(tile);
+                }
+
+#else
+
+                Destroy(tile);
+
+#endif
             }
+
             tiles.Clear();
         }
 
-        // НОВЫЙ МЕТОД - проверяет только в этом слое
-        public bool IsCellOccupiedInThisLayer(Vector3Int cellPosition)
-        {
-            if (grid == null) EnsureGrid();
-            if (grid == null) return false;
 
-            // Проверяем по списку тайлов в этом слое
-            foreach (Tile tile in tiles)
+        // =====================================================
+        // OCCUPIED CHECK
+        // =====================================================
+
+        public bool IsCellOccupiedInThisLayer(
+            Vector3Int cellPosition)
+        {
+            return GetTileAt(cellPosition) != null;
+        }
+
+
+        public bool IsCellOccupied(
+            Vector3Int cellPosition)
+        {
+            return GetTileAt(cellPosition) != null;
+        }
+
+
+        // =====================================================
+        // GET TILE
+        // =====================================================
+
+        public GameObject GetTileAt(
+            Vector3Int cellPosition)
+        {
+            if (grid == null)
+                EnsureGrid();
+
+
+            if (grid == null)
+                return null;
+
+
+            Vector3 worldPos =
+                GetTileWorldPosition(cellPosition);
+
+
+            float checkRadius =
+                Mathf.Min(
+                    grid.cellSize.x,
+                    grid.cellSize.z
+                ) * 0.35f;
+
+
+            for (int i = tiles.Count - 1; i >= 0; i--)
             {
-                if (tile != null)
+                GameObject tile = tiles[i];
+
+                if (tile == null)
                 {
-                    if (tile.CellPosition.x == cellPosition.x && tile.CellPosition.z == cellPosition.z)
-                    {
-                        return true;
-                    }
+                    tiles.RemoveAt(i);
+                    continue;
+                }
+
+
+                Vector3 a = tile.transform.position;
+                Vector3 b = worldPos;
+
+                a.y = 0f;
+                b.y = 0f;
+
+
+                float distance =
+                    Vector3.Distance(a, b);
+
+
+                if (distance < checkRadius)
+                {
+                    return tile;
                 }
             }
 
-            return false;
+
+            return null;
         }
 
-        // СТАРЫЙ МЕТОД - проверяет все слои (для совместимости)
-        public bool IsCellOccupied(Vector3Int cellPosition)
+
+        // =====================================================
+        // OTHER
+        // =====================================================
+
+        public List<GameObject> GetTilesByType(
+            string tileType)
         {
-            if (grid == null) EnsureGrid();
-            if (grid == null) return false;
-
-            // Проверяем по списку тайлов в этом слое
-            foreach (Tile tile in tiles)
-            {
-                if (tile != null)
-                {
-                    if (tile.CellPosition.x == cellPosition.x && tile.CellPosition.z == cellPosition.z)
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            // Дополнительная проверка через физику (только тайлы в этом слое)
-            Vector3 worldPos = GetTileWorldPosition(cellPosition);
-            Vector3 halfExt = grid.cellSize * 0.4f;
-            Collider[] colliders = Physics.OverlapBox(worldPos, halfExt);
-
-            foreach (Collider collider in colliders)
-            {
-                if (collider.gameObject != null && !collider.isTrigger)
-                {
-                    Tile tile = collider.GetComponentInParent<Tile>();
-                    if (tile != null && tile.CellPosition.x == cellPosition.x && tile.CellPosition.z == cellPosition.z)
-                    {
-                        // Проверяем что тайл принадлежит этому слою
-                        if (tile.transform.parent == transform)
-                        {
-                            if (!tiles.Contains(tile))
-                            {
-                                tiles.Add(tile);
-                            }
-                            return true;
-                        }
-                    }
-                }
-            }
-
-            return false;
+            return new List<GameObject>(tiles);
         }
 
-        public Tile GetTileAt(Vector3Int cellPosition)
-        {
-            return tiles.Find(t => t.CellPosition.x == cellPosition.x && t.CellPosition.z == cellPosition.z);
-        }
-
-        public List<Tile> GetTilesByType(string tileType)
-        {
-            return tiles.FindAll(t => t.TileType == tileType);
-        }
 
         public Vector3 GetLayerPosition()
         {
             return transform.position;
         }
 
-        public void SetLayerPosition(Vector3 position)
+
+        public void SetLayerPosition(
+            Vector3 position)
         {
             transform.position = position;
         }

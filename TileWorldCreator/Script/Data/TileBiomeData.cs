@@ -1,18 +1,37 @@
 using UnityEngine;
-using System.Collections.Generic;
 
 namespace TileWorldCreator
 {
-    [CreateAssetMenu(menuName = "TileWorld/Biome Data", fileName = "TileBiomeData")]
+    [CreateAssetMenu(
+        menuName = "TileWorld/Biome Data",
+        fileName = "TileBiomeData"
+    )]
     public class TileBiomeData : ScriptableObject
     {
         [Header("Identity")]
         public string biomeId;
         public string displayName;
 
-        [Header("Tile Prefabs")]
-        public GameObject[] groundTiles;
+        [Header("Terrain Auto Tiles")]
+        [Tooltip("Обычная ровная поверхность")]
+        public GameObject tileTop;
+
+        [Tooltip("Прямая стена. Rotation 0 = South (-Z)")]
+        public GameObject tileStraightWall;
+
+        [Tooltip("Внешний угол. Rotation 0 = South-West")]
+        public GameObject tileOuterCorner;
+
+        [Tooltip("Внутренний угол. Rotation 0 = South-West")]
+        public GameObject tileInnerCorner;
+
+        [Header("Auto Tiling")]
+        public bool useAutoTiling = true;
+
+        [Header("Liquid")]
         public GameObject[] liquidTiles;
+
+        [Header("Decorative")]
         public GameObject[] decorativeTiles;
 
         [Header("Environment - Rocks")]
@@ -47,26 +66,42 @@ namespace TileWorldCreator
 
         public bool IsValid =>
             !string.IsNullOrWhiteSpace(biomeId) &&
-            GetTiles("Ground").Length > 0;
+            tileTop != null;
 
         public GameObject[] GetTiles(string tileType)
         {
             switch (tileType)
             {
                 case "Ground":
-                    return groundTiles ?? new GameObject[0];
+                    return new GameObject[]
+                    {
+                        tileTop,
+                        tileStraightWall,
+                        tileOuterCorner,
+                        tileInnerCorner
+                    };
+
                 case "Liquid":
                     return liquidTiles ?? new GameObject[0];
+
                 case "Decorative":
                     return decorativeTiles ?? new GameObject[0];
+
                 default:
-                    return groundTiles ?? new GameObject[0];
+                    return new GameObject[]
+                    {
+                        tileTop,
+                        tileStraightWall,
+                        tileOuterCorner,
+                        tileInnerCorner
+                    };
             }
         }
 
         public GameObject GetRandomTile(string tileType)
         {
             GameObject[] tiles = GetTiles(tileType);
+
             if (tiles == null || tiles.Length == 0)
                 return null;
 
@@ -79,12 +114,16 @@ namespace TileWorldCreator
             {
                 case Categories.Rocks:
                     return rocks ?? new GameObject[0];
+
                 case Categories.Trees:
                     return trees ?? new GameObject[0];
+
                 case Categories.Vegetation:
                     return vegetation ?? new GameObject[0];
+
                 case Categories.Props:
                     return props ?? new GameObject[0];
+
                 default:
                     return new GameObject[0];
             }
@@ -93,6 +132,7 @@ namespace TileWorldCreator
         public GameObject GetRandomEnvironmentObject(string category)
         {
             GameObject[] objects = GetEnvironmentObjects(category);
+
             if (objects == null || objects.Length == 0)
                 return null;
 
@@ -102,6 +142,7 @@ namespace TileWorldCreator
         public bool HasEnvironmentCategory(string category)
         {
             GameObject[] objects = GetEnvironmentObjects(category);
+
             return objects != null && objects.Length > 0;
         }
     }
