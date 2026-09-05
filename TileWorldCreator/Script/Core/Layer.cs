@@ -295,7 +295,13 @@ namespace TileWorldCreator
         /// <summary>True if this layer has a painted logical tile of the given type at cellPosition.</summary>
         public bool HasTileOfType(Vector3Int cellPosition, string tileType)
         {
-            return tiles.Exists(t => t != null && t.TileType == tileType && t.CellPosition.x == cellPosition.x && t.CellPosition.z == cellPosition.z);
+            return GetTileOfType(cellPosition, tileType) != null;
+        }
+
+        /// <summary>Returns the painted logical tile of the given type at cellPosition, or null.</summary>
+        public Tile GetTileOfType(Vector3Int cellPosition, string tileType)
+        {
+            return tiles.Find(t => t != null && t.TileType == tileType && t.CellPosition.x == cellPosition.x && t.CellPosition.z == cellPosition.z);
         }
 
         private DualDisplayTile FindDisplayTile(Vector3Int displayCellPosition, string tileType)
@@ -323,16 +329,38 @@ namespace TileWorldCreator
         /// </summary>
         public void RefreshDualDisplayCell(Vector3Int displayCellPosition, string tileType, TileBiomeData biome)
         {
-            bool topLeft = HasTileOfType(displayCellPosition + new Vector3Int(-1, 0, 0), tileType);
-            bool topRight = HasTileOfType(displayCellPosition, tileType);
-            bool botLeft = HasTileOfType(displayCellPosition + new Vector3Int(-1, 0, -1), tileType);
-            bool botRight = HasTileOfType(displayCellPosition + new Vector3Int(0, 0, -1), tileType);
+            Vector3Int topLeftPos = displayCellPosition + new Vector3Int(-1, 0, 0);
+            Vector3Int topRightPos = displayCellPosition;
+            Vector3Int botLeftPos = displayCellPosition + new Vector3Int(-1, 0, -1);
+            Vector3Int botRightPos = displayCellPosition + new Vector3Int(0, 0, -1);
+
+            Tile topLeftTile = GetTileOfType(topLeftPos, tileType);
+            Tile topRightTile = GetTileOfType(topRightPos, tileType);
+            Tile botLeftTile = GetTileOfType(botLeftPos, tileType);
+            Tile botRightTile = GetTileOfType(botRightPos, tileType);
+
+            bool topLeft = topLeftTile != null;
+            bool topRight = topRightTile != null;
+            bool botLeft = botLeftTile != null;
+            bool botRight = botRightTile != null;
 
             GameObject prefab = null;
             int rotationSteps = 0;
 
             if (biome != null && DualGridAutoTile.TryGetShape(topLeft, topRight, botLeft, botRight, out DualTileShape shape, out rotationSteps))
-                biome.TryGetDualTilePrefab(tileType, shape, out prefab);
+            {
+                // Комбинируем variant seed всех участвующих (заполненных)
+                // логических тайлов - переключение варианта у любого из них
+                // (Tile.CycleVariant, по клику) меняет итоговый префаб этой
+                // display-клетки.
+                int variantSeed = 0;
+                if (topLeftTile != null) variantSeed += topLeftTile.VariantSeed;
+                if (topRightTile != null) variantSeed += topRightTile.VariantSeed;
+                if (botLeftTile != null) variantSeed += botLeftTile.VariantSeed;
+                if (botRightTile != null) variantSeed += botRightTile.VariantSeed;
+
+                biome.TryGetDualTilePrefab(tileType, shape, variantSeed, out prefab);
+            }
 
             DualDisplayTile existing = FindDisplayTile(displayCellPosition, tileType);
             if (existing != null)

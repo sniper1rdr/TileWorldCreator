@@ -89,8 +89,10 @@ namespace TileWorldCreator
 
                 bool occupied = IsCellOccupied(cellPosition);
                 // В режиме стирания клик что-то делает только если в клетке ЕСТЬ тайл.
-                // В обычном режиме клик что-то делает только если клетка ПУСТАЯ.
-                bool cellValid = isErasing ? occupied : !occupied;
+                // В обычном режиме клик разрешён и на пустой, и на занятой клетке -
+                // повторный клик по уже занятой клетке того же типа переключает
+                // визуальный вариант тайла (см. PaintLevelTile), а не ставит новый.
+                bool cellValid = isErasing ? occupied : true;
                 
                 if (cellPosition != lastHighlightedCell || cellValid != lastCellValid || isErasing != lastErasing)
                 {
@@ -349,22 +351,33 @@ namespace TileWorldCreator
         {
             if (targetLayer == null) return;
 
-            // ИСПРАВЛЕНО: Используем новый метод проверки ТОЛЬКО в этом слое
-            if (!targetLayer.IsCellOccupiedInThisLayer(cellPosition))
+            Tile existing = targetLayer.GetTileAt(cellPosition);
+            if (existing != null)
             {
-                // Логический тайл - это просто маркер занятости клетки, без
-                // собственного меша: вся видимая геометрия строится отдельно
-                // на дуальной (смещённой на пол-клетки) сетке display-тайлов.
-                Tile t = targetLayer.CreateTile(cellPosition, currentTileType);
-                if (t != null)
+                // Клетка уже занята. Если это тот же тип тайла - переключаем
+                // визуальный вариант (следующий префаб из пула), чтобы соседние
+                // тайлы одного типа не выглядели одинаково. Другой тип поверх
+                // существующего тайла клик не ставит.
+                if (existing.TileType == currentTileType)
                 {
-                    if (!targetLayer.Tiles.Contains(t))
-                        targetLayer.Tiles.Add(t);
-
-                    // Пересчитываем 4 display-клетки дуальной сетки, которые
-                    // затрагивает эта логическая клетка.
+                    existing.CycleVariant();
                     targetLayer.RefreshDualDisplayAround(cellPosition, currentTileType, currentBiome);
                 }
+                return;
+            }
+
+            // Логический тайл - это просто маркер занятости клетки, без
+            // собственного меша: вся видимая геометрия строится отдельно
+            // на дуальной (смещённой на пол-клетки) сетке display-тайлов.
+            Tile t = targetLayer.CreateTile(cellPosition, currentTileType);
+            if (t != null)
+            {
+                if (!targetLayer.Tiles.Contains(t))
+                    targetLayer.Tiles.Add(t);
+
+                // Пересчитываем 4 display-клетки дуальной сетки, которые
+                // затрагивает эта логическая клетка.
+                targetLayer.RefreshDualDisplayAround(cellPosition, currentTileType, currentBiome);
             }
         }
         

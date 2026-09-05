@@ -126,13 +126,18 @@ namespace TileWorldCreator
         }
 
         /// <summary>
-        /// Picks a single prefab for the given dual-grid display shape, based
-        /// on this biome's auto tile pools for tileType. Returns false (and a
-        /// null prefab) if no prefab is authored for that role, so the
-        /// display cell should stay empty rather than fake it with a
-        /// different role. shape/rotation come from DualGridAutoTile.TryGetShape.
+        /// Picks a prefab for the given dual-grid display shape, based on
+        /// this biome's auto tile pools for tileType. variantSeed is a
+        /// deterministic index (wrapped to the pool length) rather than a
+        /// random pick, so the same combination of neighbouring tiles always
+        /// resolves to the same prefab until a tile's variant is cycled (see
+        /// Tile.CycleVariant) - that's what lets clicking an already placed
+        /// tile switch its look instead of re-rolling every refresh. Returns
+        /// false (and a null prefab) if no prefab is authored for that role,
+        /// so the display cell should stay empty rather than fake it with a
+        /// different role. shape comes from DualGridAutoTile.TryGetShape.
         /// </summary>
-        public bool TryGetDualTilePrefab(string tileType, DualTileShape shape, out GameObject prefab)
+        public bool TryGetDualTilePrefab(string tileType, DualTileShape shape, int variantSeed, out GameObject prefab)
         {
             prefab = null;
 
@@ -144,7 +149,8 @@ namespace TileWorldCreator
             if (pool == null || pool.Length == 0)
                 return false;
 
-            prefab = pool[Random.Range(0, pool.Length)];
+            int index = ((variantSeed % pool.Length) + pool.Length) % pool.Length;
+            prefab = pool[index];
             return prefab != null;
         }
 
