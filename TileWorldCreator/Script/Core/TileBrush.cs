@@ -298,8 +298,7 @@ namespace TileWorldCreator
 
                 if (tilePrefab != null)
                 {
-                    Tile tile = targetLayer.CreateTile(cellPosition, currentTileType, tilePrefab);
-                    // CreateTile already handles visual instantiation and Undo.
+                    targetLayer.CreateTile(cellPosition, currentTileType, tilePrefab);
                 }
                 else
                 {
