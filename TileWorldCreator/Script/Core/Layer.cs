@@ -57,7 +57,7 @@ namespace TileWorldCreator
             grid = newGrid;
         }
 
-        // CreateTile теперь создаёт контейнер (Tile metadata) и, при наличии префаба, инстанцирует префаб как дочерний объект visualInstance.
+        // CreateTile теперь создаёт контейнер (Tile metadata) и, при наличии префаба, инстанцирует префаб как дочерний объект
         public Tile CreateTile(Vector3Int cellPosition, string tileType = "Default", GameObject prefab = null)
         {
             if (grid == null)
@@ -118,6 +118,14 @@ namespace TileWorldCreator
             }
 
             tiles.Add(tile);
+
+            // Удаляем Tile компонент в игре (только хранить в редакторе для отладки)
+#if !UNITY_EDITOR
+            if (Application.isPlaying)
+            {
+                Object.DestroyImmediate(tile);
+            }
+#endif
 
             return tile;
         }
