@@ -353,14 +353,14 @@ namespace TileWorldCreator
             // ИСПРАВЛЕНО: Используем новый метод проверки ТОЛЬКО в этом слое
             if (!targetLayer.IsCellOccupiedInThisLayer(cellPosition))
             {
-                System.Collections.Generic.List<(GameObject prefab, float rotationY)> pieces = null;
+                System.Collections.Generic.List<(GameObject prefab, float rotationY, Vector2 localOffset)> pieces = null;
 
                 if (currentBiome != null)
                 {
                     // Считаем маски соседей ДО постановки тайла - ячейка ещё не занята текущим тайлом
                     TileSide orthoMask = targetLayer.GetNeighborMask(cellPosition, currentTileType);
                     TileCorner cornerMask = targetLayer.GetCornerMask(cellPosition, currentTileType);
-                    pieces = currentBiome.GetAutoTilePieces(currentTileType, orthoMask, cornerMask);
+                    pieces = currentBiome.GetAutoTilePieces(currentTileType, orthoMask, cornerMask, targetLayer.CellSizeXZ);
                 }
 
                 if (pieces != null && pieces.Count > 0)
@@ -375,8 +375,10 @@ namespace TileWorldCreator
 #endif
 
                     newTile.transform.SetParent(targetLayer.transform, false);
-                    // Выставляем позицию точно в клетке
+                    // Выставляем позицию точно в клетке (+ смещение накладки, если есть)
                     Vector3 localPos = targetLayer.GetTileWorldPosition(cellPosition);
+                    localPos.x += pieces[0].localOffset.x;
+                    localPos.z += pieces[0].localOffset.y;
                     // Convert to local
                     Vector3 local = targetLayer.transform.InverseTransformPoint(localPos);
                     newTile.transform.localPosition = local;
@@ -392,7 +394,7 @@ namespace TileWorldCreator
                     // тайлов, чтобы у них никогда не оставалось незакрытых открытых сторон.
                     for (int i = 1; i < pieces.Count; i++)
                     {
-                        GameObject extra = targetLayer.CreatePiecePrefabInstance(cellPosition, pieces[i].prefab, pieces[i].rotationY, $"Tile_{cellPosition.x}_{cellPosition.z}_extra{i}");
+                        GameObject extra = targetLayer.CreatePiecePrefabInstance(cellPosition, pieces[i].prefab, pieces[i].rotationY, pieces[i].localOffset, $"Tile_{cellPosition.x}_{cellPosition.z}_extra{i}");
                         if (extra != null)
                             tileComponent.ExtraPieces.Add(extra);
                     }
@@ -430,7 +432,7 @@ namespace TileWorldCreator
 
                 TileSide orthoMask = targetLayer.GetNeighborMask(neighborCell, tileType);
                 TileCorner cornerMask = targetLayer.GetCornerMask(neighborCell, tileType);
-                var pieces = currentBiome.GetAutoTilePieces(tileType, orthoMask, cornerMask);
+                var pieces = currentBiome.GetAutoTilePieces(tileType, orthoMask, cornerMask, targetLayer.CellSizeXZ);
                 if (pieces == null || pieces.Count == 0) continue;
 
                 targetLayer.ApplyAutoTileVisual(neighborTile, pieces);

@@ -19,6 +19,19 @@ namespace TileWorldCreator
         public Grid Grid => grid;
         public List<Tile> Tiles => tiles;
 
+        /// <summary>
+        /// Cell size on the ground plane (X/Z), used to convert auto tile
+        /// overlay offset fractions (0..1 of a cell) into world units.
+        /// </summary>
+        public Vector2 CellSizeXZ
+        {
+            get
+            {
+                if (grid == null) EnsureGrid();
+                return grid != null ? new Vector2(grid.cellSize.x, grid.cellSize.z) : Vector2.one;
+            }
+        }
+
         public void Initialize(string name)
         {
             layerName = name;
@@ -351,17 +364,21 @@ namespace TileWorldCreator
         }
 
         /// <summary>
-        /// Instantiates a prefab as an extra visual piece layered on top of the
-        /// given cell (same position, its own absolute Y rotation). Used for
-        /// composite auto tile pieces (see AutoTileMask.ClassifyComposite).
+        /// Instantiates a prefab as a visual piece for the given cell, offset
+        /// by localOffset (world-space X/Z units, before being converted into
+        /// this layer's local space) from the cell centre - used to position
+        /// small edge/corner overlay pieces along the correct side or in the
+        /// correct corner of the cell instead of dead centre. Pass
+        /// Vector2.zero for a piece that should cover the whole cell (e.g.
+        /// the Flat base). See AutoTileMask.BuildPieces.
         /// </summary>
-        public GameObject CreatePiecePrefabInstance(Vector3Int cellPosition, GameObject prefab, float rotationY, string name)
+        public GameObject CreatePiecePrefabInstance(Vector3Int cellPosition, GameObject prefab, float rotationY, Vector2 localOffset, string name)
         {
             if (grid == null) EnsureGrid();
             if (grid == null || prefab == null) return null;
 
             Vector3 gridPosition = grid.GetCellCenterWorld(cellPosition);
-            Vector3 localPos = new Vector3(gridPosition.x, 0f, gridPosition.z);
+            Vector3 localPos = new Vector3(gridPosition.x + localOffset.x, 0f, gridPosition.z + localOffset.y);
             localPos = transform.InverseTransformPoint(localPos);
 
             GameObject obj;
@@ -418,7 +435,7 @@ namespace TileWorldCreator
         /// Used to re-evaluate neighbours after painting/erasing so their
         /// shape/rotation stays correct.
         /// </summary>
-        public Tile ApplyAutoTileVisual(Tile tile, System.Collections.Generic.List<(GameObject prefab, float rotationY)> pieces)
+        public Tile ApplyAutoTileVisual(Tile tile, System.Collections.Generic.List<(GameObject prefab, float rotationY, Vector2 localOffset)> pieces)
         {
             if (tile == null || pieces == null || pieces.Count == 0 || grid == null) return tile;
 
@@ -427,7 +444,7 @@ namespace TileWorldCreator
             GameObject oldObject = tile.gameObject;
             var oldExtraPieces = new System.Collections.Generic.List<GameObject>(tile.ExtraPieces);
 
-            GameObject newObject = CreatePiecePrefabInstance(cellPosition, pieces[0].prefab, pieces[0].rotationY, $"Tile_{cellPosition.x}_{cellPosition.z}");
+            GameObject newObject = CreatePiecePrefabInstance(cellPosition, pieces[0].prefab, pieces[0].rotationY, pieces[0].localOffset, $"Tile_{cellPosition.x}_{cellPosition.z}");
 
             Tile newTile = newObject.GetComponent<Tile>();
             if (newTile == null)
@@ -436,7 +453,7 @@ namespace TileWorldCreator
 
             for (int i = 1; i < pieces.Count; i++)
             {
-                GameObject extra = CreatePiecePrefabInstance(cellPosition, pieces[i].prefab, pieces[i].rotationY, $"Tile_{cellPosition.x}_{cellPosition.z}_extra{i}");
+                GameObject extra = CreatePiecePrefabInstance(cellPosition, pieces[i].prefab, pieces[i].rotationY, pieces[i].localOffset, $"Tile_{cellPosition.x}_{cellPosition.z}_extra{i}");
                 if (extra != null)
                     newTile.ExtraPieces.Add(extra);
             }
