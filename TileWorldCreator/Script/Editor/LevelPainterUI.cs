@@ -56,7 +56,7 @@ namespace TileWorldCreator
             {
                 currentBiome = availableBiomes[newIndex];
                 if (brush != null)
-                    brush.currentBiome = currentBiome;
+                    brush.SetBiome(currentBiome);
             }
 
             if (currentBiome != null)
@@ -66,7 +66,7 @@ namespace TileWorldCreator
                 currentTileType = tileTypes[typeIndex];
 
                 if (brush != null)
-                    brush.currentTileType = currentTileType;
+                    brush.SetTileType(currentTileType);
             }
 
             EditorGUILayout.Space(5);
@@ -75,8 +75,9 @@ namespace TileWorldCreator
         public void SyncToBrush(TileBrush targetBrush)
         {
             if (targetBrush == null) return;
-            targetBrush.currentBiome = currentBiome;
-            targetBrush.currentTileType = currentTileType;
+            if (currentBiome != null)
+                targetBrush.SetBiome(currentBiome);
+            targetBrush.SetTileType(currentTileType);
         }
 
         private void CreateBiomeDefinition()
@@ -99,6 +100,8 @@ namespace TileWorldCreator
 
             LoadBiomes();
             currentBiome = biome;
+            if (brush != null)
+                brush.SetBiome(currentBiome);
         }
     }
 }
