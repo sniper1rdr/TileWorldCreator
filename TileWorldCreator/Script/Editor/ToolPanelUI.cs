@@ -37,11 +37,20 @@ namespace TileWorldCreator
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField("Brush Settings", EditorStyles.miniLabel);
 
-            brush.paintOnDrag = EditorGUILayout.Toggle("Paint on Drag", brush.paintOnDrag);
-            if (brush.paintOnDrag)
+            // Читаем текущее состояние кисти и применяем изменения через сеттеры
+            bool paintOnDrag = brush.paintOnDrag;
+            bool newPaintOnDrag = EditorGUILayout.Toggle("Paint on Drag", paintOnDrag);
+            if (newPaintOnDrag != paintOnDrag)
+                brush.SetPaintOnDrag(newPaintOnDrag);
+
+            if (newPaintOnDrag)
             {
-                brush.paintInterval = EditorGUILayout.Slider("Speed", brush.paintInterval, 0.01f, 0.2f);
+                float interval = brush.paintInterval;
+                float newInterval = EditorGUILayout.Slider("Speed", interval, 0.01f, 0.2f);
+                if (!Mathf.Approximately(newInterval, interval))
+                    brush.SetPaintInterval(newInterval);
             }
+
             EditorGUILayout.EndVertical();
 
             EditorGUILayout.Space(5);
@@ -49,15 +58,12 @@ namespace TileWorldCreator
             // Кнопки Brush / Clear
             EditorGUILayout.BeginHorizontal();
 
-            // ИСПРАВЛЕНО: IsActive (с большой буквы) вместо isActive
             GUI.backgroundColor = brush.IsActive ? new Color(0.3f, 0.8f, 0.3f) : Color.white;
             string brushLabel = brush.IsActive ? "🖌️ Brush: ON" : "🖌️ Brush: OFF";
 
             if (GUILayout.Button(brushLabel, GUILayout.Height(35)))
             {
-                brush.SetActive(!brush.IsActive);  // ИСПРАВЛЕНО: IsActive
-                if (!brush.IsActive)               // ИСПРАВЛЕНО: IsActive
-                    brush.ClearAll();
+                brush.SetActive(!brush.IsActive);
             }
             GUI.backgroundColor = Color.white;
 
@@ -72,11 +78,14 @@ namespace TileWorldCreator
             EditorGUILayout.EndHorizontal();
 
             // Цвет подсветки
-            if (brush.IsActive)  // ИСПРАВЛЕНО: IsActive
+            if (brush.IsActive)
             {
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.LabelField("Highlight Color:", GUILayout.Width(100));
-                brush.highlightColor = EditorGUILayout.ColorField(brush.highlightColor);
+                Color currentColor = brush.highlightColor;
+                Color newColor = EditorGUILayout.ColorField(currentColor);
+                if (newColor != currentColor)
+                    brush.SetHighlightColor(newColor);
                 EditorGUILayout.EndHorizontal();
             }
 
