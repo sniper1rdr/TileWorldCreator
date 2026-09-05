@@ -57,8 +57,8 @@ namespace TileWorldCreator
             grid = newGrid;
         }
 
-        // CreateTile теперь создаёт контейнер (Tile metadata) и, при наличии префаба, инстанцирует префаб как дочерний объект
-        public Tile CreateTile(Vector3Int cellPosition, string tileType = "Default", GameObject prefab = null)
+        // CreateTile — инстанцирует префаб прямо в слой
+        public GameObject CreateTile(Vector3Int cellPosition, string tileType = "Default", GameObject prefab = null)
         {
             if (grid == null)
             {
@@ -82,52 +82,47 @@ namespace TileWorldCreator
 
             // Вычисляем мировую позицию для уровня (y = height of layer)
             Vector3 worldPos = new Vector3(gridPosition.x, transform.position.y, gridPosition.z);
-            Vector3 localPos = transform.InverseTransformPoint(worldPos);
 
-            // Создаём контейнер для тайла
-            GameObject container = new GameObject($"Tile_{cellPosition.x}_{cellPosition.z}");
-#if UNITY_EDITOR
-            if (!Application.isPlaying)
-                Undo.RegisterCreatedObjectUndo(container, "Create Tile Container");
-#endif
-            container.transform.SetParent(transform, false);
-            container.transform.localPosition = new Vector3(localPos.x, 0f, localPos.z);
+            GameObject visual = null;
 
-            Tile tile = container.AddComponent<Tile>();
-            tile.Initialize(cellPosition, tileType);
-
-            // Если передан префаб — инстанцируем его как дочерний визуал
             if (prefab != null)
             {
-                GameObject visual = null;
 #if UNITY_EDITOR
                 // В редакторе сохраняем связь с исходным префабом
                 visual = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
                 if (visual == null)
                     visual = Object.Instantiate(prefab);
-                Undo.RegisterCreatedObjectUndo(visual, "Instantiate Tile Visual");
+                Undo.RegisterCreatedObjectUndo(visual, "Instantiate Tile");
 #else
                 visual = Object.Instantiate(prefab);
 #endif
-                visual.transform.SetParent(container.transform, false);
-                visual.transform.localPosition = Vector3.zero;
-                visual.name = prefab.name;
-
-                tile.SetPrefabReference(prefab);
-                tile.SetVisualInstance(visual);
+                visual.transform.SetParent(transform, false);
+                visual.transform.position = worldPos;
+                visual.name = $"{prefab.name}_{cellPosition.x}_{cellPosition.z}";
+            }
+            else
+            {
+                // Создаём пустой GameObject если префаба нет
+                visual = new GameObject($"Tile_{cellPosition.x}_{cellPosition.z}");
+#if UNITY_EDITOR
+                if (!Application.isPlaying)
+                    Undo.RegisterCreatedObjectUndo(visual, "Create Empty Tile");
+#endif
+                visual.transform.SetParent(transform, false);
+                visual.transform.position = worldPos;
             }
 
-            tiles.Add(tile);
-
-            // Удаляем Tile компонент в игре (только хранить в редакторе для отладки)
-#if !UNITY_EDITOR
-            if (Application.isPlaying)
+            // Добавляем Tile компонент только в редакторе для отслеживания
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
             {
-                Object.DestroyImmediate(tile);
+                Tile tile = visual.AddComponent<Tile>();
+                tile.Initialize(cellPosition, tileType);
+                tiles.Add(tile);
             }
 #endif
 
-            return tile;
+            return visual;
         }
 
         public Vector3Int WorldToCell(Vector3 worldPosition)
