@@ -138,7 +138,7 @@ namespace TileWorldCreator
             if (tileSet == null)
                 return result;
 
-            foreach (AutoTileMask.AutoTilePiece piece in AutoTileMask.ClassifyComposite(orthoMask, cornerMask))
+            foreach (AutoTilePiece piece in AutoTileMask.ClassifyComposite(orthoMask, cornerMask))
             {
                 GameObject[] pool = GetRolePool(tileSet, piece.shape);
                 int rotationSteps = piece.rotationSteps;
