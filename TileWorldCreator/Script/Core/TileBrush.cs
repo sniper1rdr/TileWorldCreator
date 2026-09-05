@@ -94,7 +94,12 @@ namespace TileWorldCreator
                 // визуальный вариант тайла (см. PaintLevelTile), а не ставит новый.
                 bool cellValid = isErasing ? occupied : true;
                 
-                if (cellPosition != lastHighlightedCell || cellValid != lastCellValid || isErasing != lastErasing)
+                // В Environment-режиме подсветка следует точно за курсором внутри
+                // клетки (свободное размещение, не по центру), поэтому обновляем
+                // её каждый кадр, даже если клетка не изменилась.
+                bool needHighlightUpdate = cellPosition != lastHighlightedCell || cellValid != lastCellValid || isErasing != lastErasing || paintMode == "Environment";
+
+                if (needHighlightUpdate)
                 {
                     lastHighlightedCell = cellPosition;
                     lastCellValid = cellValid;
@@ -103,7 +108,7 @@ namespace TileWorldCreator
                     if (isErasing)
                     {
                         // В режиме стирания всегда показываем красный курсор
-                        UpdateHighlight(cellPosition, showRed: true);
+                        UpdateHighlight(cellPosition, worldPos, showRed: true);
                     }
                     else if (occupied)
                     {
@@ -112,7 +117,7 @@ namespace TileWorldCreator
                     }
                     else
                     {
-                        UpdateHighlight(cellPosition, showRed: false);
+                        UpdateHighlight(cellPosition, worldPos, showRed: false);
                     }
                 }
 
@@ -126,7 +131,7 @@ namespace TileWorldCreator
                         if (isErasing)
                             EraseTile(cellPosition);
                         else
-                            PaintTile(cellPosition);
+                            PaintTile(cellPosition, worldPos);
                         lastPaintedCell = cellPosition;
                         paintedCellsInSession.Add(cellPosition);
                     }
@@ -151,7 +156,7 @@ namespace TileWorldCreator
                                 if (isErasing)
                                     EraseTile(cellPosition);
                                 else
-                                    PaintTile(cellPosition);
+                                    PaintTile(cellPosition, worldPos);
                                 lastPaintedCell = cellPosition;
                                 paintedCellsInSession.Add(cellPosition);
                                 lastPaintTime = Time.realtimeSinceStartup;
@@ -211,12 +216,22 @@ namespace TileWorldCreator
             return IsEnvironmentObjectAtCell(cellPosition);
         }
         
-        private void UpdateHighlight(Vector3Int cellPosition, bool showRed)
+        private void UpdateHighlight(Vector3Int cellPosition, Vector3 rawWorldPos, bool showRed)
         {
             ClearHighlights();
 
-            Vector3 localPos = targetLayer.GetCellCenterWorld(cellPosition);
-            Vector3 worldPos = targetLayer.transform.TransformPoint(localPos);
+            Vector3 worldPos;
+            if (paintMode == "Environment")
+            {
+                // Свободное размещение - подсветка идёт точно под курсором внутри
+                // клетки, а не привязана к её центру.
+                worldPos = rawWorldPos;
+            }
+            else
+            {
+                Vector3 localPos = targetLayer.GetCellCenterWorld(cellPosition);
+                worldPos = targetLayer.transform.TransformPoint(localPos);
+            }
             // Ставим курсор НАД тайлом/объектом в клетке (а не под его мешем) - иначе его не видно,
             // особенно в режиме стирания (Ctrl), когда клетка занята.
             worldPos.y = GetHighlightWorldY(cellPosition);
@@ -326,7 +341,7 @@ namespace TileWorldCreator
             }
         }
 
-        private void PaintTile(Vector3Int cellPosition)
+        private void PaintTile(Vector3Int cellPosition, Vector3 rawWorldPos)
         {
             if (targetLayer == null) return;
             
@@ -338,7 +353,7 @@ namespace TileWorldCreator
                 }
                 else if (paintMode == "Environment")
                 {
-                    PaintEnvironment(cellPosition);
+                    PaintEnvironment(cellPosition, rawWorldPos);
                 }
             }
             catch (System.Exception ex)
@@ -381,7 +396,7 @@ namespace TileWorldCreator
             }
         }
         
-        private void PaintEnvironment(Vector3Int cellPosition)
+        private void PaintEnvironment(Vector3Int cellPosition, Vector3 rawWorldPos)
         {
             if (targetLayer == null) return;
             
@@ -418,14 +433,21 @@ namespace TileWorldCreator
                 envRoot = envObject.AddComponent<EnvironmentRoot>();
             }
             
-            Vector3 localPos = targetLayer.GetCellCenterWorld(cellPosition);
-            Vector3 worldPos = targetLayer.transform.TransformPoint(localPos);
-            worldPos.y = targetLayer.transform.position.y;
+            // Свободное размещение: X/Z берём прямо из точки клика (не по центру
+            // клетки), а Y - поверх tile (см. GetHighlightWorldY/GetTileTopWorldY),
+            // а не на уровне земли под его мешем.
+            Vector3 worldPos = rawWorldPos;
+            worldPos.y = GetTileTopWorldY(cellPosition);
             
             GameObject obj = Object.Instantiate(prefab);
             obj.transform.position = worldPos;
             obj.transform.SetParent(envRoot.transform, true);
             obj.name = $"{prefab.name}_{envRoot.EnvironmentObjects.Count}";
+
+            EnvironmentObjectMarker marker = obj.GetComponent<EnvironmentObjectMarker>();
+            if (marker == null)
+                marker = obj.AddComponent<EnvironmentObjectMarker>();
+            marker.Initialize(cellPosition);
             
             if (environmentBiome.randomRotation)
             {
@@ -447,7 +469,11 @@ namespace TileWorldCreator
             return FindEnvironmentObjectAtCell(cellPosition) != null;
         }
 
-        /// <summary>Найти ближайший объект окружения в клетке (в радиусе checkRadius от её центра), либо null.</summary>
+        /// <summary>
+        /// Найти объект окружения, помеченный этой логической клеткой (см.
+        /// EnvironmentObjectMarker) - не зависит от его точной X/Z позиции,
+        /// т.к. объекты окружения ставятся свободно внутри клетки, а не по её центру.
+        /// </summary>
         private GameObject FindEnvironmentObjectAtCell(Vector3Int cellPosition)
         {
             if (targetLayer == null) return null;
@@ -458,66 +484,44 @@ namespace TileWorldCreator
             EnvironmentRoot envRoot = worldRoot.Environment;
             if (envRoot == null) return null;
 
-            Vector3 localPos = targetLayer.GetCellCenterWorld(cellPosition);
-            Vector3 worldPos = targetLayer.transform.TransformPoint(localPos);
-            worldPos.y = targetLayer.transform.position.y;
-
-            float cellSize = 1f;
-            if (targetLayer.Grid != null)
-                cellSize = targetLayer.Grid.cellSize.x;
-            float checkRadius = cellSize * 0.3f;
-
-            GameObject closest = null;
-            float closestDistance = float.MaxValue;
-
             foreach (GameObject obj in envRoot.EnvironmentObjects)
             {
                 if (obj == null) continue;
 
-                float distance = Vector3.Distance(obj.transform.position, worldPos);
-                if (distance < checkRadius && distance < closestDistance)
-                {
-                    closest = obj;
-                    closestDistance = distance;
-                }
+                EnvironmentObjectMarker marker = obj.GetComponent<EnvironmentObjectMarker>();
+                if (marker != null && marker.CellPosition.x == cellPosition.x && marker.CellPosition.z == cellPosition.z)
+                    return obj;
             }
 
-            return closest;
+            return null;
+        }
+
+        /// <summary>
+        /// Мировая высота верхней поверхности tile в этой клетке (или уровня
+        /// слоя, если тайла там нет) - и подсветка, и объекты окружения должны
+        /// стоять НА НЕЙ, а не быть спрятаны под мешем тайла.
+        /// </summary>
+        private float GetTileTopWorldY(Vector3Int cellPosition)
+        {
+            float baseY = targetLayer.transform.position.y;
+
+            // Логический Tile - это пустой маркер без меша (вся геометрия
+            // рисуется отдельно на смещённой dual-grid сетке), поэтому
+            // высоту его "поверхности" берём из настроек биома.
+            Tile tile = targetLayer.GetTileAt(cellPosition);
+            if (tile == null) return baseY;
+
+            float height = currentBiome != null ? currentBiome.tileHeight : 1f;
+            return baseY + height;
         }
 
         /// <summary>
         /// Высота (мировая Y), на которой нужно рисовать курсор-подсветку, чтобы он был виден
-        /// НАД тайлом/объектом в клетке, а не спрятан под его мешем.
+        /// НАД тайлом в клетке, а не спрятан под его мешем.
         /// </summary>
         private float GetHighlightWorldY(Vector3Int cellPosition)
         {
-            float baseY = targetLayer.transform.position.y + 0.01f;
-
-            if (paintMode == "Level")
-            {
-                // В Level-режиме логический Tile - это пустой маркер без меша
-                // (вся геометрия рисуется отдельно на смещённой dual-grid
-                // сетке), поэтому высоту берём из настроек биома, а не из
-                // Renderer.bounds.
-                Tile tile = targetLayer.GetTileAt(cellPosition);
-                if (tile == null) return baseY;
-
-                float height = currentBiome != null ? currentBiome.tileHeight : 1f;
-                return baseY + height + 0.02f;
-            }
-
-            GameObject occupant = FindEnvironmentObjectAtCell(cellPosition);
-            if (occupant == null) return baseY;
-
-            Renderer[] renderers = occupant.GetComponentsInChildren<Renderer>();
-            if (renderers.Length == 0) return baseY;
-
-            Bounds bounds = renderers[0].bounds;
-            for (int i = 1; i < renderers.Length; i++)
-                bounds.Encapsulate(renderers[i].bounds);
-
-            float topY = bounds.max.y + 0.02f;
-            return Mathf.Max(baseY, topY);
+            return GetTileTopWorldY(cellPosition) + 0.02f;
         }
         
         // ============ HELPER METHODS ============
