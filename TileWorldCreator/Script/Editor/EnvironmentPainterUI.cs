@@ -10,7 +10,7 @@ namespace TileWorldCreator
         private TileBiomeData currentEnvironmentBiome;
         private List<TileBiomeData> availableBiomes = new List<TileBiomeData>();
         
-        private readonly string[] environmentCategories = { "Rocks", "Trees", "Vegetation", "Props" };
+        private readonly string[] environmentCategories = { TileBiomeData.Categories.Rocks, TileBiomeData.Categories.Trees, TileBiomeData.Categories.Vegetation, TileBiomeData.Categories.Props };
         private int selectedCategoryIndex = 0;
 
         public EnvironmentPainterUI(TileBrush brush)
@@ -35,105 +35,97 @@ namespace TileWorldCreator
                 currentEnvironmentBiome = availableBiomes[0];
         }
 
-   public void Draw()
-{
-    EditorGUILayout.LabelField("Environment", EditorStyles.boldLabel);
-
-    if (availableBiomes.Count == 0)
-    {
-        EditorGUILayout.HelpBox("No biomes! Create one.", MessageType.Info);
-        if (GUILayout.Button("Create Biome"))
-            CreateBiomeDefinition();
-        return;
-    }
-
-    // === Biome selection ===
-    int currentIndex = Mathf.Max(0, availableBiomes.IndexOf(currentEnvironmentBiome));
-    string[] biomeNames = new string[availableBiomes.Count];
-    for (int i = 0; i < availableBiomes.Count; i++)
-        biomeNames[i] = availableBiomes[i].displayName;
-
-    int newIndex = EditorGUILayout.Popup("Biome", currentIndex, biomeNames);
-    if (newIndex != currentIndex)
-    {
-        currentEnvironmentBiome = availableBiomes[newIndex];
-        if (brush != null)
-            brush.environmentBiome = currentEnvironmentBiome;
-    }
-
-    if (currentEnvironmentBiome == null) return;
-
-    // === Category selection ===
-    int newCategoryIndex = EditorGUILayout.Popup("Category", selectedCategoryIndex, environmentCategories);
-    if (newCategoryIndex != selectedCategoryIndex)
-    {
-        selectedCategoryIndex = newCategoryIndex;
-        if (brush != null)
-            brush.environmentCategory = environmentCategories[selectedCategoryIndex];
-    }
-
-    string category = environmentCategories[selectedCategoryIndex];
-    GameObject[] objects = currentEnvironmentBiome.GetEnvironmentObjects(category);
-    int count = objects?.Length ?? 0;
-
-    EditorGUILayout.LabelField($"Objects in {category}: {count}", EditorStyles.miniLabel);
-    EditorGUILayout.Space(4);
-
-    // === Prefab Previews ===
-    if (count > 0)
-    {
-        EditorGUILayout.LabelField("Prefabs:", EditorStyles.miniLabel);
-
-        // Сколько превью в ряд
-        int previewSize = 64;
-        int columns = Mathf.Max(1, (int)(EditorGUIUtility.currentViewWidth - 40) / (previewSize + 8));
-
-        int drawn = 0;
-        while (drawn < count)
+        public void Draw()
         {
-            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Environment", EditorStyles.boldLabel);
 
-            for (int col = 0; col < columns && drawn < count; col++, drawn++)
+            if (availableBiomes.Count == 0)
             {
-                GameObject prefab = objects[drawn];
-                if (prefab == null) continue;
-
-                // Получаем превью префаба
-                Texture2D preview = AssetPreview.GetAssetPreview(prefab);
-                if (preview == null)
-                    preview = AssetPreview.GetMiniThumbnail(prefab);
-
-                // Рисуем кнопку с превью
-                GUIContent content = new GUIContent(preview, prefab.name);
-
-                if (GUILayout.Button(content, GUILayout.Width(previewSize), GUILayout.Height(previewSize)))
-                {
-                    // При клике выделяем префаб в Project
-                    Selection.activeObject = prefab;
-                    EditorGUIUtility.PingObject(prefab);
-                }
+                EditorGUILayout.HelpBox("No biomes! Create one.", MessageType.Info);
+                if (GUILayout.Button("Create Biome"))
+                    CreateBiomeDefinition();
+                return;
             }
 
-            EditorGUILayout.EndHorizontal();
-            EditorGUILayout.Space(4);
-        }
-    }
-    else
-    {
-        EditorGUILayout.HelpBox(
-            $"No objects in '{category}' category.\nAdd prefabs in the Biome Data asset.",
-            MessageType.Info);
-    }
+            int currentIndex = Mathf.Max(0, availableBiomes.IndexOf(currentEnvironmentBiome));
+            string[] biomeNames = new string[availableBiomes.Count];
+            for (int i = 0; i < availableBiomes.Count; i++)
+                biomeNames[i] = availableBiomes[i].displayName;
 
-    EditorGUILayout.Space(5);
-}
+            int newIndex = EditorGUILayout.Popup("Biome", currentIndex, biomeNames);
+            if (newIndex != currentIndex)
+            {
+                currentEnvironmentBiome = availableBiomes[newIndex];
+                if (brush != null)
+                    brush.SetEnvironmentBiome(currentEnvironmentBiome);
+            }
+
+            if (currentEnvironmentBiome == null) return;
+
+            // Category selection
+            int newCategoryIndex = EditorGUILayout.Popup("Category", selectedCategoryIndex, environmentCategories);
+            if (newCategoryIndex != selectedCategoryIndex)
+            {
+                selectedCategoryIndex = newCategoryIndex;
+                if (brush != null)
+                    brush.SetEnvironmentCategory(environmentCategories[selectedCategoryIndex]);
+            }
+
+            string category = environmentCategories[selectedCategoryIndex];
+            GameObject[] objects = currentEnvironmentBiome.GetEnvironmentObjects(category);
+            int count = objects?.Length ?? 0;
+
+            EditorGUILayout.LabelField($"Objects in {category}: {count}", EditorStyles.miniLabel);
+            EditorGUILayout.Space(4);
+
+            if (count > 0)
+            {
+                EditorGUILayout.LabelField("Prefabs:", EditorStyles.miniLabel);
+
+                int previewSize = 64;
+                int columns = Mathf.Max(1, (int)(EditorGUIUtility.currentViewWidth - 40) / (previewSize + 8));
+
+                int drawn = 0;
+                while (drawn < count)
+                {
+                    EditorGUILayout.BeginHorizontal();
+
+                    for (int col = 0; col < columns && drawn < count; col++, drawn++)
+                    {
+                        GameObject prefab = objects[drawn];
+                        if (prefab == null) continue;
+
+                        Texture2D preview = AssetPreview.GetAssetPreview(prefab);
+                        if (preview == null)
+                            preview = AssetPreview.GetMiniThumbnail(prefab);
+
+                        GUIContent content = new GUIContent(preview, prefab.name);
+
+                        if (GUILayout.Button(content, GUILayout.Width(previewSize), GUILayout.Height(previewSize)))
+                        {
+                            Selection.activeObject = prefab;
+                            EditorGUIUtility.PingObject(prefab);
+                        }
+                    }
+
+                    EditorGUILayout.EndHorizontal();
+                    EditorGUILayout.Space(4);
+                }
+            }
+            else
+            {
+                EditorGUILayout.HelpBox($"No objects in '{category}' category.\nAdd prefabs in the Biome Data asset.", MessageType.Info);
+            }
+
+            EditorGUILayout.Space(5);
+        }
 
         public void SyncToBrush(TileBrush targetBrush)
         {
             if (targetBrush == null) return;
 
-            targetBrush.environmentBiome = currentEnvironmentBiome;
-            targetBrush.environmentCategory = environmentCategories[selectedCategoryIndex];
+            targetBrush.SetEnvironmentBiome(currentEnvironmentBiome);
+            targetBrush.SetEnvironmentCategory(environmentCategories[selectedCategoryIndex]);
         }
 
         private void CreateBiomeDefinition()
