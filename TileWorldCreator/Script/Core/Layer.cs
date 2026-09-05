@@ -1,6 +1,10 @@
 using UnityEngine;
 using System.Collections.Generic;
 
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
 namespace TileWorldCreator
 {
     [AddComponentMenu("TileWorld/Core/Layer")]
@@ -53,9 +57,10 @@ namespace TileWorldCreator
             grid = newGrid;
         }
 
-        public Tile CreateTile(Vector3Int cellPosition, string tileType = "Default")
+        // Теперь CreateTile поддерживает передачу префаба, чтобы избегать лишних создания/удаления объектов
+        public Tile CreateTile(Vector3Int cellPosition, string tileType = "Default", GameObject prefab = null)
         {
-            if (grid == null) 
+            if (grid == null)
             {
                 EnsureGrid();
                 if (grid == null)
@@ -74,27 +79,52 @@ namespace TileWorldCreator
 
             // Получаем позицию от Grid
             Vector3 gridPosition = grid.GetCellCenterWorld(cellPosition);
-            
-            // Берем ТОЛЬКО X и Z, Y ВСЕГДА 0
+
+            // Берем ТОЛЬКО X и Z, Y устанавливаем в позицию слоя
             Vector3 localPos = new Vector3(gridPosition.x, 0f, gridPosition.z);
             localPos = transform.InverseTransformPoint(localPos);
-            
-            // Создаем GameObject для тайла
-            GameObject tileObject = new GameObject($"Tile_{cellPosition.x}_{cellPosition.z}");
-            tileObject.transform.SetParent(transform, false);
-            
-            // Устанавливаем ТОЛЬКО позицию
-            tileObject.transform.localPosition = new Vector3(localPos.x, 0f, localPos.z);
-            
-            Tile tile = tileObject.AddComponent<Tile>();
+
+            GameObject tileObject = null;
+
+            if (prefab != null)
+            {
+#if UNITY_EDITOR
+                // Стараться использовать PrefabUtility в редакторе для сохранения связей
+                tileObject = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+                if (tileObject == null)
+                    tileObject = Object.Instantiate(prefab);
+                Undo.RegisterCreatedObjectUndo(tileObject, "Create Tile");
+#else
+                tileObject = Object.Instantiate(prefab);
+#endif
+                tileObject.transform.SetParent(transform, false);
+
+                // Устанавливаем локальную позицию согласно ячейке
+                Vector3 worldPos = new Vector3(gridPosition.x, transform.position.y, gridPosition.z);
+                Vector3 local = transform.InverseTransformPoint(worldPos);
+                tileObject.transform.localPosition = new Vector3(local.x, 0f, local.z);
+                tileObject.name = $"Tile_{cellPosition.x}_{cellPosition.z}";
+            }
+            else
+            {
+                // Создаем GameObject для тайла-заглушки
+                tileObject = new GameObject($"Tile_{cellPosition.x}_{cellPosition.z}");
+                tileObject.transform.SetParent(transform, false);
+                tileObject.transform.localPosition = new Vector3(localPos.x, 0f, localPos.z);
+
+#if UNITY_EDITOR
+                if (!Application.isPlaying)
+                    UnityEditor.Undo.RegisterCreatedObjectUndo(tileObject, "Create Tile");
+#endif
+            }
+
+            Tile tile = tileObject.GetComponent<Tile>();
+            if (tile == null)
+                tile = tileObject.AddComponent<Tile>();
+
             tile.Initialize(cellPosition, tileType);
 
             tiles.Add(tile);
-
-#if UNITY_EDITOR
-            if (!Application.isPlaying)
-                UnityEditor.Undo.RegisterCreatedObjectUndo(tileObject, "Create Tile");
-#endif
 
             return tile;
         }
@@ -102,7 +132,7 @@ namespace TileWorldCreator
         public Vector3Int WorldToCell(Vector3 worldPosition)
         {
             if (grid == null) EnsureGrid();
-            
+
             if (grid != null)
             {
                 Vector3Int cellPos = grid.WorldToCell(worldPosition);
@@ -115,7 +145,7 @@ namespace TileWorldCreator
         public Vector3 GetCellCenterWorld(Vector3Int cellPosition)
         {
             if (grid == null) EnsureGrid();
-            
+
             if (grid != null)
             {
                 Vector3 worldPos = grid.GetCellCenterWorld(cellPosition);
@@ -166,7 +196,7 @@ namespace TileWorldCreator
                     }
                 }
             }
-            
+
             return false;
         }
 
@@ -190,8 +220,9 @@ namespace TileWorldCreator
 
             // Дополнительная проверка через физику (только тайлы в этом слое)
             Vector3 worldPos = GetTileWorldPosition(cellPosition);
-            Collider[] colliders = Physics.OverlapBox(worldPos, grid.cellSize * 0.4f);
-            
+            Vector3 halfExt = grid.cellSize * 0.4f;
+            Collider[] colliders = Physics.OverlapBox(worldPos, halfExt);
+
             foreach (Collider collider in colliders)
             {
                 if (collider.gameObject != null && !collider.isTrigger)
@@ -211,7 +242,7 @@ namespace TileWorldCreator
                     }
                 }
             }
-            
+
             return false;
         }
 
