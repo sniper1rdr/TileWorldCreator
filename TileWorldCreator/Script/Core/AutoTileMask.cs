@@ -224,13 +224,14 @@ namespace TileWorldCreator
                 return pieces.ToArray();
             }
 
-            // sideCount == 0: fully isolated tile, all 4 sides open. 2 OuterCorner
-            // pieces rotated 180 degrees apart (steps 0 and 2) close N+E and S+W -
-            // exactly all 4 sides, no gaps, no overlap.
+            // sideCount == 0: fully isolated tile, all 4 sides open - build it out
+            // of all 4 Outer Corner rotations (0/90/180/270) layered together.
             return new[]
             {
                 new AutoTilePiece(AutoTileShape.OuterCorner, 0),
-                new AutoTilePiece(AutoTileShape.OuterCorner, 2)
+                new AutoTilePiece(AutoTileShape.OuterCorner, 1),
+                new AutoTilePiece(AutoTileShape.OuterCorner, 2),
+                new AutoTilePiece(AutoTileShape.OuterCorner, 3)
             };
         }
 
