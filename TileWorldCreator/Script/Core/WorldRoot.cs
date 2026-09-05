@@ -86,7 +86,7 @@ namespace TileWorldCreator
             return FindObjectOfType<WorldRoot>();
         }
         
-        public Tile CreateTile(Vector3Int cellPosition, string tileType = "Default")
+        public GameObject CreateTile(Vector3Int cellPosition, string tileType = "Default")
         {
             if (levelsRoot == null) EnsureLevelsRoot();
             if (levelsRoot == null) return null;
