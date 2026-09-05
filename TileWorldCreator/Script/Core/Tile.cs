@@ -8,9 +8,13 @@ namespace TileWorldCreator
     {
         [SerializeField] private Vector3Int cellPosition;
         [SerializeField] private string tileType = "Default";
+        [SerializeField] private GameObject prefabReference;
+        [SerializeField] private GameObject visualInstance;
 
         public Vector3Int CellPosition => cellPosition;
         public string TileType => tileType;
+        public GameObject PrefabReference => prefabReference;
+        public GameObject VisualInstance => visualInstance;
 
         public void Initialize(Vector3Int position, string type = "Default")
         {
@@ -22,6 +26,16 @@ namespace TileWorldCreator
         public void SetTileType(string type)
         {
             tileType = type;
+        }
+
+        public void SetPrefabReference(GameObject prefab)
+        {
+            prefabReference = prefab;
+        }
+
+        public void SetVisualInstance(GameObject visual)
+        {
+            visualInstance = visual;
         }
 
         /// <summary>
