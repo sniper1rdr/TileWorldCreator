@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections.Generic;
 
 namespace TileWorldCreator
 {
@@ -36,23 +37,30 @@ namespace TileWorldCreator
         public bool randomRotation = true;
         public Vector2 randomScaleRange = new Vector2(0.8f, 1.2f);
 
-        public bool IsValid => 
-            !string.IsNullOrWhiteSpace(biomeId) && 
-            groundTiles != null && 
-            groundTiles.Length > 0;
+        public static class Categories
+n        {
+            public const string Rocks = "Rocks";
+            public const string Trees = "Trees";
+            public const string Vegetation = "Vegetation";
+            public const string Props = "Props";
+        }
+
+        public bool IsValid =>
+            !string.IsNullOrWhiteSpace(biomeId) &&
+            GetTiles("Ground").Length > 0;
 
         public GameObject[] GetTiles(string tileType)
         {
             switch (tileType)
             {
                 case "Ground":
-                    return groundTiles;
+                    return groundTiles ?? new GameObject[0];
                 case "Liquid":
-                    return liquidTiles;
+                    return liquidTiles ?? new GameObject[0];
                 case "Decorative":
-                    return decorativeTiles;
+                    return decorativeTiles ?? new GameObject[0];
                 default:
-                    return groundTiles;
+                    return groundTiles ?? new GameObject[0];
             }
         }
 
@@ -61,7 +69,7 @@ namespace TileWorldCreator
             GameObject[] tiles = GetTiles(tileType);
             if (tiles == null || tiles.Length == 0)
                 return null;
-            
+
             return tiles[Random.Range(0, tiles.Length)];
         }
 
@@ -69,16 +77,16 @@ namespace TileWorldCreator
         {
             switch (category)
             {
-                case "Rocks":
-                    return rocks;
-                case "Trees":
-                    return trees;
-                case "Vegetation":
-                    return vegetation;
-                case "Props":
-                    return props;
+                case Categories.Rocks:
+                    return rocks ?? new GameObject[0];
+                case Categories.Trees:
+                    return trees ?? new GameObject[0];
+                case Categories.Vegetation:
+                    return vegetation ?? new GameObject[0];
+                case Categories.Props:
+                    return props ?? new GameObject[0];
                 default:
-                    return null;
+                    return new GameObject[0];
             }
         }
 
@@ -87,7 +95,7 @@ namespace TileWorldCreator
             GameObject[] objects = GetEnvironmentObjects(category);
             if (objects == null || objects.Length == 0)
                 return null;
-            
+
             return objects[Random.Range(0, objects.Length)];
         }
 
