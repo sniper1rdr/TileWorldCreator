@@ -57,7 +57,7 @@ namespace TileWorldCreator
             grid = newGrid;
         }
 
-        // Теперь CreateTile поддерживает передачу префаба, чтобы избегать лишних создания/удаления объектов
+        // CreateTile теперь создаёт контейнер (Tile metadata) и, при наличии префаба, инстанцирует префаб как дочерний объект visualInstance.
         public Tile CreateTile(Vector3Int cellPosition, string tileType = "Default", GameObject prefab = null)
         {
             if (grid == null)
@@ -80,49 +80,42 @@ namespace TileWorldCreator
             // Получаем позицию от Grid
             Vector3 gridPosition = grid.GetCellCenterWorld(cellPosition);
 
-            // Берем ТОЛЬКО X и Z, Y устанавливаем в позицию слоя
-            Vector3 localPos = new Vector3(gridPosition.x, 0f, gridPosition.z);
-            localPos = transform.InverseTransformPoint(localPos);
+            // Вычисляем мировую позицию для уровня (y = height of layer)
+            Vector3 worldPos = new Vector3(gridPosition.x, transform.position.y, gridPosition.z);
+            Vector3 localPos = transform.InverseTransformPoint(worldPos);
 
-            GameObject tileObject = null;
+            // Создаём контейнер для тайла
+            GameObject container = new GameObject($"Tile_{cellPosition.x}_{cellPosition.z}");
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+                Undo.RegisterCreatedObjectUndo(container, "Create Tile Container");
+#endif
+            container.transform.SetParent(transform, false);
+            container.transform.localPosition = new Vector3(localPos.x, 0f, localPos.z);
 
+            Tile tile = container.AddComponent<Tile>();
+            tile.Initialize(cellPosition, tileType);
+
+            // Если передан префаб — инстанцируем его как дочерний визуал
             if (prefab != null)
             {
+                GameObject visual = null;
 #if UNITY_EDITOR
-                // Стараться использовать PrefabUtility в редакторе для сохранения связей
-                tileObject = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-                if (tileObject == null)
-                    tileObject = Object.Instantiate(prefab);
-                Undo.RegisterCreatedObjectUndo(tileObject, "Create Tile");
+                // В редакторе сохраняем связь с исходным префабом
+                visual = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+                if (visual == null)
+                    visual = Object.Instantiate(prefab);
+                Undo.RegisterCreatedObjectUndo(visual, "Instantiate Tile Visual");
 #else
-                tileObject = Object.Instantiate(prefab);
+                visual = Object.Instantiate(prefab);
 #endif
-                tileObject.transform.SetParent(transform, false);
+                visual.transform.SetParent(container.transform, false);
+                visual.transform.localPosition = Vector3.zero;
+                visual.name = prefab.name;
 
-                // Устанавливаем локальную позицию согласно ячейке
-                Vector3 worldPos = new Vector3(gridPosition.x, transform.position.y, gridPosition.z);
-                Vector3 local = transform.InverseTransformPoint(worldPos);
-                tileObject.transform.localPosition = new Vector3(local.x, 0f, local.z);
-                tileObject.name = $"Tile_{cellPosition.x}_{cellPosition.z}";
+                tile.SetPrefabReference(prefab);
+                tile.SetVisualInstance(visual);
             }
-            else
-            {
-                // Создаем GameObject для тайла-заглушки
-                tileObject = new GameObject($"Tile_{cellPosition.x}_{cellPosition.z}");
-                tileObject.transform.SetParent(transform, false);
-                tileObject.transform.localPosition = new Vector3(localPos.x, 0f, localPos.z);
-
-#if UNITY_EDITOR
-                if (!Application.isPlaying)
-                    UnityEditor.Undo.RegisterCreatedObjectUndo(tileObject, "Create Tile");
-#endif
-            }
-
-            Tile tile = tileObject.GetComponent<Tile>();
-            if (tile == null)
-                tile = tileObject.AddComponent<Tile>();
-
-            tile.Initialize(cellPosition, tileType);
 
             tiles.Add(tile);
 
@@ -227,7 +220,7 @@ namespace TileWorldCreator
             {
                 if (collider.gameObject != null && !collider.isTrigger)
                 {
-                    Tile tile = collider.GetComponent<Tile>();
+                    Tile tile = collider.GetComponentInParent<Tile>();
                     if (tile != null && tile.CellPosition.x == cellPosition.x && tile.CellPosition.z == cellPosition.z)
                     {
                         // Проверяем что тайл принадлежит этому слою
