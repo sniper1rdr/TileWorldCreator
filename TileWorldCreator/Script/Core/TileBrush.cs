@@ -45,6 +45,11 @@ namespace TileWorldCreator
 
         // Кэшированный материал для подсветки (чтобы не выделять память каждый кадр)
         private Material highlightMaterial;
+
+        // Превью реального префаба в Environment-режиме (вместо зелёного квадрата)
+        private GameObject environmentPreviewObject;
+        private GameObject environmentPreviewSourcePrefab;
+        private string environmentPreviewCategory;
         
         // ============ PUBLIC METHODS ============
         
@@ -68,6 +73,7 @@ namespace TileWorldCreator
                 {
                     lastHighlightedCell = new Vector3Int(-999, -999, -999);
                     ClearHighlights();
+                    ClearEnvironmentPreview();
                 }
                 return;
             }
@@ -108,12 +114,21 @@ namespace TileWorldCreator
                     if (isErasing)
                     {
                         // В режиме стирания всегда показываем красный курсор
+                        ClearEnvironmentPreview();
                         UpdateHighlight(cellPosition, worldPos, showRed: true);
                     }
                     else if (occupied)
                     {
                         // Занятую клетку в обычном режиме больше не подсвечиваем красным - просто ничего не показываем
                         ClearHighlights();
+                        ClearEnvironmentPreview();
+                    }
+                    else if (paintMode == "Environment")
+                    {
+                        // Вместо зелёного квадрата показываем сам выбранный префаб -
+                        // сразу видно, что и куда встанет.
+                        ClearHighlights();
+                        UpdateEnvironmentPreview(cellPosition, worldPos);
                     }
                     else
                     {
@@ -172,6 +187,7 @@ namespace TileWorldCreator
                 {
                     lastHighlightedCell = new Vector3Int(-999, -999, -999);
                     ClearHighlights();
+                    ClearEnvironmentPreview();
                 }
                 
                 if (e.type == EventType.MouseUp && e.button == 0)
@@ -187,6 +203,7 @@ namespace TileWorldCreator
         public void ClearAll()
         {
             ClearHighlights();
+            ClearEnvironmentPreview();
             lastHighlightedCell = new Vector3Int(-999, -999, -999);
             lastPaintedCell = new Vector3Int(-999, -999, -999);
             isMouseDown = false;
@@ -264,6 +281,48 @@ namespace TileWorldCreator
             highlightedObjects.Add(highlight);
         }
         
+        /// <summary>Показывает превью реального выбранного префаба на месте курсора вместо квадрата.</summary>
+        private void UpdateEnvironmentPreview(Vector3Int cellPosition, Vector3 worldPos)
+        {
+            if (environmentBiome == null)
+            {
+                ClearEnvironmentPreview();
+                return;
+            }
+
+            if (environmentPreviewObject == null || environmentPreviewCategory != environmentCategory)
+            {
+                ClearEnvironmentPreview();
+                GameObject prefab = environmentBiome.GetRandomEnvironmentObject(environmentCategory);
+                if (prefab == null)
+                {
+                    ClearEnvironmentPreview();
+                    return;
+                }
+
+                environmentPreviewObject = Object.Instantiate(prefab);
+                environmentPreviewObject.name = "EnvironmentPreview";
+                environmentPreviewObject.hideFlags = HideFlags.HideAndDontSave;
+                environmentPreviewSourcePrefab = prefab;
+                environmentPreviewCategory = environmentCategory;
+
+                foreach (Collider col in environmentPreviewObject.GetComponentsInChildren<Collider>())
+                    col.enabled = false;
+            }
+
+            worldPos.y = GetTileTopWorldY(cellPosition);
+            environmentPreviewObject.transform.position = worldPos;
+        }
+
+        private void ClearEnvironmentPreview()
+        {
+            if (environmentPreviewObject != null)
+                Object.DestroyImmediate(environmentPreviewObject);
+            environmentPreviewObject = null;
+            environmentPreviewSourcePrefab = null;
+            environmentPreviewCategory = null;
+        }
+
         private void ClearHighlights()
         {
             foreach (GameObject obj in highlightedObjects)
