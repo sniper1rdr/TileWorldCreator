@@ -37,6 +37,7 @@ namespace TileWorldCreator
         private Vector3Int lastHighlightedCell = new Vector3Int(-999, -999, -999);
         private Vector3Int lastPaintedCell = new Vector3Int(-999, -999, -999);
         private bool lastCellValid = false;
+        private bool lastErasing = false;
         
         private bool isMouseDown = false;
         private float lastPaintTime = 0f;
@@ -56,7 +57,10 @@ namespace TileWorldCreator
 
             Event e = Event.current;
             
-            bool isAltPressed = e.alt || e.control || e.command;
+            // Alt/Cmd остаются для навигации камерой (орбита/панорама) - не трогаем их
+            bool isAltPressed = e.alt || e.command;
+            // Ctrl - режим стирания: делает "дыры" в уровне
+            bool isErasing = e.control;
             
             if (isAltPressed)
             {
@@ -83,13 +87,31 @@ namespace TileWorldCreator
                 Vector3Int cellPosition = grid.WorldToCell(worldPos);
                 cellPosition.y = 0;
 
-                bool cellValid = IsCellValid(cellPosition);
+                bool occupied = IsCellOccupied(cellPosition);
+                // В режиме стирания клик что-то делает только если в клетке ЕСТЬ тайл.
+                // В обычном режиме клик что-то делает только если клетка ПУСТАЯ.
+                bool cellValid = isErasing ? occupied : !occupied;
                 
-                if (cellPosition != lastHighlightedCell || cellValid != lastCellValid)
+                if (cellPosition != lastHighlightedCell || cellValid != lastCellValid || isErasing != lastErasing)
                 {
                     lastHighlightedCell = cellPosition;
                     lastCellValid = cellValid;
-                    UpdateHighlight(cellPosition, cellValid);
+                    lastErasing = isErasing;
+
+                    if (isErasing)
+                    {
+                        // В режиме стирания всегда показываем красный курсор
+                        UpdateHighlight(cellPosition, showRed: true);
+                    }
+                    else if (occupied)
+                    {
+                        // Занятую клетку в обычном режиме больше не подсвечиваем красным - просто ничего не показываем
+                        ClearHighlights();
+                    }
+                    else
+                    {
+                        UpdateHighlight(cellPosition, showRed: false);
+                    }
                 }
 
                 if (e.type == EventType.MouseDown && e.button == 0 && !isAltPressed)
@@ -99,7 +121,10 @@ namespace TileWorldCreator
                     
                     if (cellValid)
                     {
-                        PaintTile(cellPosition);
+                        if (isErasing)
+                            EraseTile(cellPosition);
+                        else
+                            PaintTile(cellPosition);
                         lastPaintedCell = cellPosition;
                         paintedCellsInSession.Add(cellPosition);
                     }
@@ -121,7 +146,10 @@ namespace TileWorldCreator
                         {
                             if (!paintedCellsInSession.Contains(cellPosition))
                             {
-                                PaintTile(cellPosition);
+                                if (isErasing)
+                                    EraseTile(cellPosition);
+                                else
+                                    PaintTile(cellPosition);
                                 lastPaintedCell = cellPosition;
                                 paintedCellsInSession.Add(cellPosition);
                                 lastPaintTime = Time.realtimeSinceStartup;
@@ -167,20 +195,21 @@ namespace TileWorldCreator
         
         // ============ PRIVATE METHODS ============
         
-        private bool IsCellValid(Vector3Int cellPosition)
+        /// <summary>Занята ли клетка в текущем режиме рисования (Level: тайлом в этом слое, Environment: объектом окружения).</summary>
+        private bool IsCellOccupied(Vector3Int cellPosition)
         {
             if (targetLayer == null) return false;
             
             if (paintMode == "Level")
             {
                 // ИСПРАВЛЕНО: Используем новый метод проверки ТОЛЬКО в этом слое
-                return !targetLayer.IsCellOccupiedInThisLayer(cellPosition);
+                return targetLayer.IsCellOccupiedInThisLayer(cellPosition);
             }
             
-            return !IsEnvironmentObjectAtCell(cellPosition);
+            return IsEnvironmentObjectAtCell(cellPosition);
         }
         
-        private void UpdateHighlight(Vector3Int cellPosition, bool valid)
+        private void UpdateHighlight(Vector3Int cellPosition, bool showRed)
         {
             ClearHighlights();
 
@@ -209,7 +238,7 @@ namespace TileWorldCreator
             }
 
             // Меняем цвет кэширующегося материала
-            highlightMaterial.color = valid ? validColor : invalidColor;
+            highlightMaterial.color = showRed ? invalidColor : validColor;
             renderer.sharedMaterial = highlightMaterial;
 
             highlight.hideFlags = HideFlags.HideAndDontSave;
@@ -228,6 +257,102 @@ namespace TileWorldCreator
             highlightedObjects.Clear();
         }
         
+        /// <summary>Стирание тайла/объекта окружения под курсором (Ctrl зажат) - делает "дыру" в уровне.</summary>
+        private void EraseTile(Vector3Int cellPosition)
+        {
+            if (targetLayer == null) return;
+
+            try
+            {
+                if (paintMode == "Level")
+                {
+                    EraseLevelTile(cellPosition);
+                }
+                else if (paintMode == "Environment")
+                {
+                    EraseEnvironmentObject(cellPosition);
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Error erasing tile: {ex.Message}");
+            }
+        }
+
+        private void EraseLevelTile(Vector3Int cellPosition)
+        {
+            if (targetLayer == null) return;
+
+            Tile tile = targetLayer.GetTileAt(cellPosition);
+            if (tile == null) return;
+
+            string tileType = tile.TileType;
+            GameObject tileObject = tile.gameObject;
+
+            targetLayer.Tiles.Remove(tile);
+
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+                UnityEditor.Undo.DestroyObjectImmediate(tileObject);
+            else
+                Object.Destroy(tileObject);
+#else
+            Object.Destroy(tileObject);
+#endif
+
+            // Соседи вокруг дыры могли потерять соединение - пересчитываем их форму/поворот
+            RefreshAutoTileNeighbors(cellPosition, tileType);
+        }
+
+        private void EraseEnvironmentObject(Vector3Int cellPosition)
+        {
+            if (targetLayer == null) return;
+
+            WorldRoot worldRoot = targetLayer.GetComponentInParent<WorldRoot>();
+            if (worldRoot == null) return;
+
+            EnvironmentRoot envRoot = worldRoot.Environment;
+            if (envRoot == null) return;
+
+            Vector3 localPos = targetLayer.GetCellCenterWorld(cellPosition);
+            Vector3 worldPos = targetLayer.transform.TransformPoint(localPos);
+            worldPos.y = targetLayer.transform.position.y;
+
+            float cellSize = 1f;
+            if (targetLayer.Grid != null)
+                cellSize = targetLayer.Grid.cellSize.x;
+            float checkRadius = cellSize * 0.3f;
+
+            GameObject closest = null;
+            float closestDistance = float.MaxValue;
+
+            foreach (GameObject obj in envRoot.EnvironmentObjects)
+            {
+                if (obj == null) continue;
+
+                float dist = Vector3.Distance(obj.transform.position, worldPos);
+                if (dist < checkRadius && dist < closestDistance)
+                {
+                    closest = obj;
+                    closestDistance = dist;
+                }
+            }
+
+            if (closest != null)
+            {
+                envRoot.EnvironmentObjects.Remove(closest);
+
+#if UNITY_EDITOR
+                if (!Application.isPlaying)
+                    UnityEditor.Undo.DestroyObjectImmediate(closest);
+                else
+                    Object.Destroy(closest);
+#else
+                Object.Destroy(closest);
+#endif
+            }
+        }
+
         private void PaintTile(Vector3Int cellPosition)
         {
             if (targetLayer == null) return;
