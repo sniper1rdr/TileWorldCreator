@@ -1,6 +1,11 @@
 using UnityEngine;
-using UnityEditor;
 using System.Collections.Generic;
+
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine.SceneManagement;
+#endif
 
 namespace TileWorldCreator
 {
@@ -14,7 +19,8 @@ namespace TileWorldCreator
         public string environmentCategory = "Rocks";
         
         // === Visual ===
-        public Color highlightColor = new Color(0.2f, 0.8f, 0.2f, 0.5f);
+        public Color highlightColor = new Color(0.2f, 0.8f, 0.2f, 0.25f);
+        public Color outlineColor = new Color(0f, 0f, 0f, 0.5f);
         public Color validColor = new Color(0.2f, 0.8f, 0.2f, 0.5f);
         public Color invalidColor = new Color(0.8f, 0.2f, 0.2f, 0.5f);
         
@@ -33,7 +39,6 @@ namespace TileWorldCreator
         }
         
         // Внутренние переменные
-        private List<GameObject> highlightedObjects = new List<GameObject>();
         private Vector3Int lastHighlightedCell = new Vector3Int(-999, -999, -999);
         private Vector3Int lastPaintedCell = new Vector3Int(-999, -999, -999);
         private bool lastCellValid = false;
@@ -41,14 +46,12 @@ namespace TileWorldCreator
         private bool isMouseDown = false;
         private float lastPaintTime = 0f;
         private HashSet<Vector3Int> paintedCellsInSession = new HashSet<Vector3Int>();
-
-        // Кэшированный материал для подсветки (чтобы не выделять память каждый кадр)
-        private Material highlightMaterial;
         
         // ============ PUBLIC METHODS ============
         
         public void OnSceneGUI(SceneView sceneView)
         {
+#if UNITY_EDITOR
             if (!isActive || targetLayer == null) return;
             
             Grid grid = targetLayer.Grid;
@@ -63,7 +66,6 @@ namespace TileWorldCreator
                 if (lastHighlightedCell != new Vector3Int(-999, -999, -999))
                 {
                     lastHighlightedCell = new Vector3Int(-999, -999, -999);
-                    ClearHighlights();
                 }
                 return;
             }
@@ -89,8 +91,10 @@ namespace TileWorldCreator
                 {
                     lastHighlightedCell = cellPosition;
                     lastCellValid = cellValid;
-                    UpdateHighlight(cellPosition, cellValid);
                 }
+
+                // Рисуем подсветку через Handles
+                DrawHighlight(cellPosition, cellValid);
 
                 if (e.type == EventType.MouseDown && e.button == 0 && !isAltPressed)
                 {
@@ -136,7 +140,6 @@ namespace TileWorldCreator
                 if (lastHighlightedCell != new Vector3Int(-999, -999, -999))
                 {
                     lastHighlightedCell = new Vector3Int(-999, -999, -999);
-                    ClearHighlights();
                 }
                 
                 if (e.type == EventType.MouseUp && e.button == 0)
@@ -147,22 +150,15 @@ namespace TileWorldCreator
             }
 
             sceneView.Repaint();
+#endif
         }
         
         public void ClearAll()
         {
-            ClearHighlights();
             lastHighlightedCell = new Vector3Int(-999, -999, -999);
             lastPaintedCell = new Vector3Int(-999, -999, -999);
             isMouseDown = false;
             paintedCellsInSession.Clear();
-
-            // Очистим кэшированный материал
-            if (highlightMaterial != null)
-            {
-                Object.DestroyImmediate(highlightMaterial);
-                highlightMaterial = null;
-            }
         }
         
         // ============ PRIVATE METHODS ============
@@ -173,60 +169,37 @@ namespace TileWorldCreator
             
             if (paintMode == "Level")
             {
-                // ИСПРАВЛЕНО: Используем новый метод проверки ТОЛЬКО в этом слое
                 return !targetLayer.IsCellOccupiedInThisLayer(cellPosition);
             }
             
             return !IsEnvironmentObjectAtCell(cellPosition);
         }
         
-        private void UpdateHighlight(Vector3Int cellPosition, bool valid)
+#if UNITY_EDITOR
+        private void DrawHighlight(Vector3Int cellPosition, bool valid)
         {
-            ClearHighlights();
+            if (targetLayer == null || targetLayer.Grid == null) return;
 
-            Vector3 localPos = targetLayer.GetCellCenterWorld(cellPosition);
-            Vector3 worldPos = targetLayer.transform.TransformPoint(localPos);
-            worldPos.y = targetLayer.transform.position.y + 0.01f;
-            
-            GameObject highlight = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            highlight.name = "GridHighlight";
-            highlight.transform.position = worldPos;
-            highlight.transform.rotation = Quaternion.Euler(90, 0, 0);
+            Vector3 center = targetLayer.GetCellCenterWorld(cellPosition);
+            float layerY = targetLayer.transform.position.y + 0.01f;
+            center.y = layerY;
 
-            Vector3 cellSize = Vector3.one;
-            if (targetLayer.Grid != null)
-                cellSize = targetLayer.Grid.cellSize;
+            Vector3 cellSize = targetLayer.Grid.cellSize;
+            float hx = cellSize.x * 0.5f;
+            float hz = cellSize.z * 0.5f;
 
-            highlight.transform.localScale = new Vector3(cellSize.x, cellSize.z, 1);
+            Vector3 bl = new Vector3(center.x - hx, center.y, center.z - hz);
+            Vector3 tl = new Vector3(center.x - hx, center.y, center.z + hz);
+            Vector3 tr = new Vector3(center.x + hx, center.y, center.z + hz);
+            Vector3 br = new Vector3(center.x + hx, center.y, center.z - hz);
 
-            Renderer renderer = highlight.GetComponent<Renderer>();
+            Color fill = valid ? validColor : invalidColor;
+            Color outline = outlineColor;
 
-            if (highlightMaterial == null)
-            {
-                Shader shader = Shader.Find("Unlit/Color");
-                highlightMaterial = new Material(shader ?? Shader.Find("Sprites/Default"));
-                highlightMaterial.hideFlags = HideFlags.HideAndDontSave;
-            }
-
-            // Меняем цвет кэширующегося материала
-            highlightMaterial.color = valid ? validColor : invalidColor;
-            renderer.sharedMaterial = highlightMaterial;
-
-            highlight.hideFlags = HideFlags.HideAndDontSave;
-            highlightedObjects.Add(highlight);
+            Handles.zTest = UnityEngine.Rendering.CompareFunction.LessEqual;
+            Handles.DrawSolidRectangleWithOutline(new Vector3[] { bl, tl, tr, br }, fill, outline);
         }
-        
-        private void ClearHighlights()
-        {
-            foreach (GameObject obj in highlightedObjects)
-            {
-                if (obj != null)
-                {
-                    Object.DestroyImmediate(obj);
-                }
-            }
-            highlightedObjects.Clear();
-        }
+#endif
         
         private void PaintTile(Vector3Int cellPosition)
         {
@@ -253,7 +226,6 @@ namespace TileWorldCreator
         {
             if (targetLayer == null) return;
             
-            // ИСПРАВЛЕНО: Используем новый метод проверки ТОЛЬКО в этом слое
             if (!targetLayer.IsCellOccupiedInThisLayer(cellPosition))
             {
                 GameObject tilePrefab = null;
@@ -265,55 +237,12 @@ namespace TileWorldCreator
 
                 if (tilePrefab != null)
                 {
-                    // Создаем через Layer, но CreateTile создаёт временный плэйсхолдер — удаляем его
-                    Tile placeholder = targetLayer.CreateTile(cellPosition, currentTileType);
-                    if (placeholder != null)
-                    {
-                        // Удаляем плэйсхолдер из списка слоёв чтобы не оставить null/дубликат
-                        if (targetLayer.Tiles.Contains(placeholder))
-                            targetLayer.Tiles.Remove(placeholder);
-
-#if UNITY_EDITOR
-                        if (!Application.isPlaying)
-                            UnityEditor.Undo.DestroyObjectImmediate(placeholder.gameObject);
-                        else
-#endif
-                            Object.Destroy(placeholder.gameObject);
-                    }
-
-#if UNITY_EDITOR
-                    GameObject newTile = PrefabUtility.InstantiatePrefab(tilePrefab) as GameObject;
-                    if (newTile == null)
-                        newTile = Object.Instantiate(tilePrefab);
-                    Undo.RegisterCreatedObjectUndo(newTile, "Place Tile");
-#else
-                    GameObject newTile = Object.Instantiate(tilePrefab);
-#endif
-
-                    newTile.transform.SetParent(targetLayer.transform, false);
-                    // Выставляем позицию точно в клетке
-                    Vector3 localPos = targetLayer.GetTileWorldPosition(cellPosition);
-                    // Convert to local
-                    Vector3 local = targetLayer.transform.InverseTransformPoint(localPos);
-                    newTile.transform.localPosition = local;
-                    newTile.name = $"Tile_{cellPosition.x}_{cellPosition.z}";
-
-                    Tile tileComponent = newTile.GetComponent<Tile>();
-                    if (tileComponent == null)
-                        tileComponent = newTile.AddComponent<Tile>();
-                    tileComponent.Initialize(cellPosition, currentTileType);
-
-                    if (!targetLayer.Tiles.Contains(tileComponent))
-                    {
-                        targetLayer.Tiles.Add(tileComponent);
-                    }
+                    Tile tile = targetLayer.CreateTile(cellPosition, currentTileType, tilePrefab);
+                    // CreateTile already handles visual instantiation and Undo.
                 }
                 else
                 {
-                    // Если нет префаба - создаём простую заглушку
-                    Tile t = targetLayer.CreateTile(cellPosition, "Default");
-                    if (t != null && !targetLayer.Tiles.Contains(t))
-                        targetLayer.Tiles.Add(t);
+                    targetLayer.CreateTile(cellPosition, "Default", null);
                 }
             }
         }
