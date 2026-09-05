@@ -1,0 +1,42 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 16e758383a75b844089127fb7ad01097, type: 3}
+  m_Name: NewBiomeData
+  m_EditorClassIdentifier: Assembly-CSharp::TileWorldCreator.TileBiomeData
+  biomeId: NewBiomeData
+  displayName: NewBiomeData
+  groundTiles:
+  - {fileID: 525140772934673804, guid: 3bd14f4981f97fd45b42248affc45a3a, type: 3}
+  - {fileID: 484442516585458140, guid: e0b13c8d1a92660468e9796303f6041a, type: 3}
+  - {fileID: 594050641655294807, guid: 7e4234c608e1ab341a66a8ddd0153f09, type: 3}
+  - {fileID: 229587654972240457, guid: 1afee66dfb2cd424083eff4afa62a232, type: 3}
+  - {fileID: 755746787703254227, guid: 04b06afd66f1fc34f86d395bf409a9f6, type: 3}
+  liquidTiles:
+  - {fileID: 2984669213698713195, guid: 73c13ab30ab171640bda31792802268d, type: 3}
+  - {fileID: 1787640137700532181, guid: caa7c0fe22a277447ba7041587f4317a, type: 3}
+  - {fileID: 2472736650581480384, guid: 28175b9b4acc06845bc6b5862f332987, type: 3}
+  decorativeTiles:
+  - {fileID: 919132149155446097, guid: 91a8486d33251f040b1152f3442d7966, type: 3}
+  rocks:
+  - {fileID: 8261502779630752912, guid: 98f14f2b607fa4b4a80ab4b868808b71, type: 3}
+  trees:
+  - {fileID: 2813308248211662404, guid: 362e073d5d9dfba4b892ef8a9c3a549a, type: 3}
+  vegetation:
+  - {fileID: 8115136913897205223, guid: 0766453cf4b94704ea8f3ab8b4ab02b1, type: 3}
+  props:
+  - {fileID: 3426101514235513966, guid: b87cd508738dbcc45a0ad7d55241aad7, type: 3}
+  groundMaterial: {fileID: 0}
+  liquidMaterial: {fileID: 0}
+  decorativeMaterial: {fileID: 0}
+  tileHeight: 1
+  randomRotation: 1
+  randomScaleRange: {x: 0.8, y: 1.2}
