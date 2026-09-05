@@ -28,10 +28,6 @@ namespace TileWorldCreator
         // Настройки
         private float levelHeight = 1f;
 
-        // ============================================
-        //  Window Setup
-        // ============================================
-
         [MenuItem("Tools/TileWorld Creator")]
         public static void ShowWindow()
         {
@@ -82,18 +78,12 @@ namespace TileWorldCreator
             if (brush != null)
             {
                 Layer currentLayer = GetCurrentLayer();
-                if (brush.targetLayer != currentLayer)
-                {
-                    brush.targetLayer = currentLayer;
-                }
+                if (brush != null)
+                    brush.SetTargetLayer(currentLayer);
             }
             
             brush?.OnSceneGUI(sceneView);
         }
-
-        // ============================================
-        //  Main GUI
-        // ============================================
 
         private void OnGUI()
         {
@@ -104,15 +94,12 @@ namespace TileWorldCreator
             }
 
             RefreshLevelsAndLayers();
-            
+
             // Всегда обновляем targetLayer при каждом GUI обновлении
             if (brush != null)
             {
                 Layer currentLayer = GetCurrentLayer();
-                if (brush.targetLayer != currentLayer)
-                {
-                    brush.targetLayer = currentLayer;
-                }
+                brush.SetTargetLayer(currentLayer);
             }
 
             scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
@@ -145,16 +132,11 @@ namespace TileWorldCreator
             EditorGUILayout.EndScrollView();
         }
 
-        // ============================================
-        //  Level Management
-        // ============================================
-
         private void DrawLevelManagement()
         {
             EditorGUILayout.LabelField("Levels", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
-            // Настройка высоты уровня
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Height Step:", GUILayout.Width(80));
             float newHeight = EditorGUILayout.FloatField(levelHeight, GUILayout.Width(60));
@@ -166,9 +148,8 @@ namespace TileWorldCreator
 
             EditorGUILayout.Space(3);
 
-            // Кнопки управления уровнями
             EditorGUILayout.BeginHorizontal();
-            
+
             GUI.backgroundColor = new Color(0.3f, 0.8f, 0.3f);
             if (GUILayout.Button("⬆ Above (+1)", GUILayout.Height(30)))
             {
@@ -197,7 +178,6 @@ namespace TileWorldCreator
 
             EditorGUILayout.Space(3);
 
-            // Список уровней
             if (availableLevels.Count > 0)
             {
                 List<Level> sortedLevels = new List<Level>(availableLevels);
@@ -247,10 +227,6 @@ namespace TileWorldCreator
 
             EditorGUILayout.EndVertical();
         }
-
-        // ============================================
-        //  Layer Management
-        // ============================================
 
         private void DrawLayerManagement()
         {
@@ -311,7 +287,7 @@ namespace TileWorldCreator
                             selectedLayerIndex = i;
                             currentLevel.SetActiveLayer(selectedLayerIndex);
                             if (brush != null)
-                                brush.targetLayer = currentLevel.ActiveLayer;
+                                brush.SetTargetLayer(currentLevel.ActiveLayer);
                             RefreshLevelsAndLayers();
                             SyncBrush();
                         }
@@ -331,10 +307,6 @@ namespace TileWorldCreator
 
             EditorGUILayout.EndVertical();
         }
-
-        // ============================================
-        //  Drawing helpers
-        // ============================================
 
         private void DrawHeader()
         {
@@ -366,7 +338,7 @@ namespace TileWorldCreator
             if (GUILayout.Button("🧱 Tiles", GUILayout.Height(28)))
             {
                 currentMode = PaintMode.Level;
-                if (brush != null) brush.paintMode = "Level";
+                brush?.SetPaintMode("Level");
                 levelUI?.SyncToBrush(brush);
             }
 
@@ -377,7 +349,7 @@ namespace TileWorldCreator
             if (GUILayout.Button("🌳 Environment", GUILayout.Height(28)))
             {
                 currentMode = PaintMode.Environment;
-                if (brush != null) brush.paintMode = "Environment";
+                brush?.SetPaintMode("Environment");
                 environmentUI?.SyncToBrush(brush);
             }
 
@@ -425,10 +397,6 @@ namespace TileWorldCreator
 
             EditorGUILayout.EndHorizontal();
         }
-
-        // ============================================
-        //  Helpers
-        // ============================================
 
         private Level GetCurrentLevel()
         {
@@ -500,11 +468,14 @@ namespace TileWorldCreator
         private void CreateWorldRoot()
         {
             GameObject rootObject = new GameObject(WorldRoot.WorldObjectName);
+#if UNITY_EDITOR
+            Undo.RegisterCreatedObjectUndo(rootObject, "Create WorldRoot");
+#endif
             worldRoot = rootObject.AddComponent<WorldRoot>();
             worldRoot.SetWorldName("MyWorld");
 
             LevelsRoot levels = worldRoot.FindOrCreateLevels();
-            
+
             Level baseLevel = levels.CreateLevel("Base_Level", 0f);
             baseLevel.CreateDefaultLayer();
 
@@ -513,10 +484,6 @@ namespace TileWorldCreator
             RefreshLevelsAndLayers();
             SyncBrush();
         }
-
-        // ============================================
-        //  CREATE / REMOVE LEVELS
-        // ============================================
 
         private void CreateLevelAbove()
         {
@@ -537,13 +504,13 @@ namespace TileWorldCreator
                 maxHeight = 0f;
 
             float newHeight = maxHeight + levelHeight;
-            
+
             Level newLevel = worldRoot.Levels.CreateLevel($"Level_{availableLevels.Count + 1:00}", newHeight);
             newLevel.CreateDefaultLayer();
 
             RefreshLevelsAndLayers();
             SyncBrush();
-            
+
             for (int i = 0; i < availableLevels.Count; i++)
             {
                 if (availableLevels[i] == newLevel)
@@ -552,7 +519,7 @@ namespace TileWorldCreator
                     break;
                 }
             }
-            
+
             if (worldRoot != null)
             {
                 EditorGUIUtility.PingObject(newLevel);
@@ -578,13 +545,13 @@ namespace TileWorldCreator
                 minHeight = 0f;
 
             float newHeight = minHeight - levelHeight;
-            
+
             Level newLevel = worldRoot.Levels.CreateLevel($"Level_{availableLevels.Count + 1:00}", newHeight);
             newLevel.CreateDefaultLayer();
 
             RefreshLevelsAndLayers();
             SyncBrush();
-            
+
             for (int i = 0; i < availableLevels.Count; i++)
             {
                 if (availableLevels[i] == newLevel)
@@ -593,7 +560,7 @@ namespace TileWorldCreator
                     break;
                 }
             }
-            
+
             if (worldRoot != null)
             {
                 EditorGUIUtility.PingObject(newLevel);
@@ -625,16 +592,11 @@ namespace TileWorldCreator
             }
         }
 
-        // ============================================
-        //  CREATE / REMOVE LAYERS
-        // ============================================
-
         private void CreateNewLayer()
         {
             Level level = GetCurrentLevel();
             if (level == null) return;
 
-            // Создаем слой с уникальным именем
             string layerName = $"Layer_{level.Layers.Count:00}";
             Layer newLayer = level.CreateLayer(layerName);
             
@@ -645,7 +607,7 @@ namespace TileWorldCreator
                 
                 if (brush != null)
                 {
-                    brush.targetLayer = newLayer;
+                    brush.SetTargetLayer(newLayer);
                 }
             }
             
@@ -661,7 +623,6 @@ namespace TileWorldCreator
             Layer layer = GetCurrentLayer();
             if (layer == null) return;
 
-            // Не даем удалить базовый слой
             if (layer.LayerName == "Base Layer")
             {
                 EditorUtility.DisplayDialog(
@@ -681,7 +642,7 @@ namespace TileWorldCreator
                 
                 if (brush != null)
                 {
-                    brush.targetLayer = level.ActiveLayer;
+                    brush.SetTargetLayer(level.ActiveLayer);
                 }
                 
                 RefreshLevelsAndLayers();
@@ -700,10 +661,8 @@ namespace TileWorldCreator
             if (levelUI != null) levelUI.SyncToBrush(brush);
             if (environmentUI != null) environmentUI.SyncToBrush(brush);
 
-            brush.paintMode = currentMode.ToString();
-            
-            // Всегда обновляем targetLayer
-            brush.targetLayer = GetCurrentLayer();
+            brush.SetPaintMode(currentMode.ToString());
+            brush.SetTargetLayer(GetCurrentLayer());
         }
 
         private void ClearCurrentLayer()
