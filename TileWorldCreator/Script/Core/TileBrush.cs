@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEditor;
 using System.Collections.Generic;
 
 #if UNITY_EDITOR
@@ -160,21 +161,69 @@ namespace TileWorldCreator
             isMouseDown = false;
             paintedCellsInSession.Clear();
         }
-        
-        // ============ PRIVATE METHODS ============
-        
-        private bool IsCellValid(Vector3Int cellPosition)
+
+        // Setter helpers for UI encapsulation
+        public void SetPaintOnDrag(bool value)
         {
-            if (targetLayer == null) return false;
-            
-            if (paintMode == "Level")
-            {
-                return !targetLayer.IsCellOccupiedInThisLayer(cellPosition);
-            }
-            
-            return !IsEnvironmentObjectAtCell(cellPosition);
+            paintOnDrag = value;
+        }
+
+        public void SetPaintInterval(float value)
+        {
+            paintInterval = Mathf.Max(0.001f, value);
+        }
+
+        public void SetHighlightColor(Color color)
+        {
+            highlightColor = color;
+            validColor = new Color(color.r, color.g, color.b, 0.5f);
         }
         
+        public void SetTargetLayer(Layer layer)
+        {
+            targetLayer = layer;
+        }
+
+        public void SetBiome(TileBiomeData biome)
+        {
+            currentBiome = biome;
+        }
+
+        public void SetTileType(string type)
+        {
+            currentTileType = type;
+        }
+
+        public void SetEnvironmentBiome(TileBiomeData biome)
+        {
+            environmentBiome = biome;
+        }
+
+        public void SetEnvironmentCategory(string category)
+        {
+            environmentCategory = category;
+        }
+
+        public void SetPaintMode(string mode)
+        {
+            paintMode = mode;
+        }
+
+        public void SetActive(bool active)
+        {
+            isActive = active;
+            if (!active)
+            {
+                ClearAll();
+            }
+        }
+
+        public void LoadBiomes()
+        {
+            // Метод для совместимости с UI
+        }
+
+        // ============ PRIVATE METHODS ============
 #if UNITY_EDITOR
         private void DrawHighlight(Vector3Int cellPosition, bool valid)
         {
@@ -200,7 +249,19 @@ namespace TileWorldCreator
             Handles.DrawSolidRectangleWithOutline(new Vector3[] { bl, tl, tr, br }, fill, outline);
         }
 #endif
-        
+
+        private bool IsCellValid(Vector3Int cellPosition)
+        {
+            if (targetLayer == null) return false;
+            
+            if (paintMode == "Level")
+            {
+                return !targetLayer.IsCellOccupiedInThisLayer(cellPosition);
+            }
+            
+            return !IsEnvironmentObjectAtCell(cellPosition);
+        }
+
         private void PaintTile(Vector3Int cellPosition)
         {
             if (targetLayer == null) return;
@@ -221,7 +282,7 @@ namespace TileWorldCreator
                 Debug.LogError($"Error painting tile: {ex.Message}");
             }
         }
-        
+
         private void PaintLevelTile(Vector3Int cellPosition)
         {
             if (targetLayer == null) return;
@@ -246,7 +307,7 @@ namespace TileWorldCreator
                 }
             }
         }
-        
+
         private void PaintEnvironment(Vector3Int cellPosition)
         {
             if (targetLayer == null) return;
@@ -288,7 +349,14 @@ namespace TileWorldCreator
             Vector3 worldPos = targetLayer.transform.TransformPoint(localPos);
             worldPos.y = targetLayer.transform.position.y;
             
+#if UNITY_EDITOR
+            GameObject obj = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+            if (obj == null)
+                obj = Object.Instantiate(prefab);
+            Undo.RegisterCreatedObjectUndo(obj, $"Place {environmentCategory}");
+#else
             GameObject obj = Object.Instantiate(prefab);
+#endif
             obj.transform.position = worldPos;
             obj.transform.SetParent(envRoot.transform, true);
             obj.name = $"{prefab.name}_{envRoot.EnvironmentObjects.Count}";
@@ -302,12 +370,8 @@ namespace TileWorldCreator
             obj.transform.localScale = Vector3.one * scale;
             
             envRoot.EnvironmentObjects.Add(obj);
-            
-#if UNITY_EDITOR
-            Undo.RegisterCreatedObjectUndo(obj, $"Place {environmentCategory}");
-#endif
         }
-        
+
         private bool IsEnvironmentObjectAtCell(Vector3Int cellPosition)
         {
             if (targetLayer == null) return false;
@@ -339,52 +403,6 @@ namespace TileWorldCreator
             }
             
             return false;
-        }
-        
-        // ============ HELPER METHODS ============
-        
-        public void SetTargetLayer(Layer layer)
-        {
-            targetLayer = layer;
-        }
-        
-        public void SetBiome(TileBiomeData biome)
-        {
-            currentBiome = biome;
-        }
-        
-        public void SetTileType(string type)
-        {
-            currentTileType = type;
-        }
-        
-        public void SetEnvironmentBiome(TileBiomeData biome)
-        {
-            environmentBiome = biome;
-        }
-        
-        public void SetEnvironmentCategory(string category)
-        {
-            environmentCategory = category;
-        }
-        
-        public void SetPaintMode(string mode)
-        {
-            paintMode = mode;
-        }
-        
-        public void SetActive(bool active)
-        {
-            isActive = active;
-            if (!active)
-            {
-                ClearAll();
-            }
-        }
-        
-        public void LoadBiomes()
-        {
-            // Метод для совместимости с UI
         }
     }
 }
