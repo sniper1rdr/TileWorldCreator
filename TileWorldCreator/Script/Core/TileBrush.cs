@@ -6,200 +6,257 @@ namespace TileWorldCreator
 {
     public class TileBrush
     {
-        // === Settings ===
+        // ============================================================
+        // SETTINGS
+        // ============================================================
         public string paintMode = "Level";
         public TileBiomeData currentBiome;
         public string currentTileType = "Ground";
         public TileBiomeData environmentBiome;
         public string environmentCategory = "Rocks";
-        
-        // === Visual ===
+
+        // ============================================================
+        // VISUAL
+        // ============================================================
         public Color highlightColor = new Color(0.2f, 0.8f, 0.2f, 0.5f);
         public Color validColor = new Color(0.2f, 0.8f, 0.2f, 0.5f);
         public Color invalidColor = new Color(0.8f, 0.2f, 0.2f, 0.5f);
-        
-        // === Brush Settings ===
+
+        // ============================================================
+        // BRUSH SETTINGS
+        // ============================================================
         public bool paintOnDrag = true;
         public float paintInterval = 0.05f;
-        
-        // === State ===
-        private bool isActive = false;
+
+        // ============================================================
+        // ENVIRONMENT TRANSFORM
+        // ============================================================
+        public bool environmentRotationEnabled = true;
+        public bool environmentRandomRotation = true;
+        public float environmentRotation = 0f;
+        public bool environmentScaleEnabled = true;
+        public float environmentScale = 1f;
+
+        // ============================================================
+        // ROTATION
+        // ============================================================
+        private float currentPreviewRotation = 0f;
+        private const float ShiftRotationSpeed = 90f; // градусов в секунду
+
+        // ============================================================
+        // STATE
+        // ============================================================
+        private bool isActive;
         public Layer targetLayer;
-        
-        public bool IsActive 
-        { 
-            get => isActive; 
-            set => isActive = value; 
+        public bool IsActive
+        {
+            get => isActive;
+            set => isActive = value;
         }
-        
-        // Внутренние переменные
-        private List<GameObject> highlightedObjects = new List<GameObject>();
+
+        // ============================================================
+        // INTERNAL STATE
+        // ============================================================
+        private readonly List<GameObject> highlightedObjects = new List<GameObject>();
         private Vector3Int lastHighlightedCell = new Vector3Int(-999, -999, -999);
         private Vector3Int lastPaintedCell = new Vector3Int(-999, -999, -999);
-        private bool lastCellValid = false;
-        private bool lastErasing = false;
-        
-        private bool isMouseDown = false;
-        private float lastPaintTime = 0f;
-        private HashSet<Vector3Int> paintedCellsInSession = new HashSet<Vector3Int>();
+        private bool lastCellValid;
+        private bool lastErasing;
+        private bool isMouseDown;
+        private float lastPaintTime;
+        private readonly HashSet<Vector3Int> paintedCellsInSession = new HashSet<Vector3Int>();
 
-        // Кэшированный материал для подсветки (чтобы не выделять память каждый кадр)
+        // ============================================================
+        // HIGHLIGHT
+        // ============================================================
         private Material highlightMaterial;
 
-        // Превью реального префаба в Environment-режиме (вместо зелёного квадрата)
+        // ============================================================
+        // ENVIRONMENT PREVIEW
+        // ============================================================
         private GameObject environmentPreviewObject;
         private GameObject environmentPreviewSourcePrefab;
         private string environmentPreviewCategory;
-        
-        // ============ PUBLIC METHODS ============
-        
+
+        // ============================================================
+        // PUBLIC METHODS
+        // ============================================================
         public void OnSceneGUI(SceneView sceneView)
         {
-            if (!isActive || targetLayer == null) return;
-            
-            Grid grid = targetLayer.Grid;
+            if (!isActive) return;
+
+            Level level = GetLevel();
+            if (level == null) return;
+
+            // ===== ВАЖНО: всегда берём слои от АКТИВНОГО Level =====
+            Layer groundLayer = level.GetGroundLayer();
+            if (groundLayer == null) return;
+
+            groundLayer.EnsureGrid();
+            Grid grid = groundLayer.Grid;
             if (grid == null) return;
 
-            Event e = Event.current;
-            
-            // Alt/Cmd остаются для навигации камерой (орбита/панорама) - не трогаем их
-            bool isAltPressed = e.alt || e.command;
-            // Ctrl - режим стирания: делает "дыры" в уровне
-            bool isErasing = e.control;
-            
-            if (isAltPressed)
+            // Target layer тоже всегда от текущего Level
+            if (paintMode == "Environment")
             {
-                if (lastHighlightedCell != new Vector3Int(-999, -999, -999))
-                {
-                    lastHighlightedCell = new Vector3Int(-999, -999, -999);
-                    ClearHighlights();
-                    ClearEnvironmentPreview();
-                }
-                return;
-            }
-
-            Vector3 mousePosition = e.mousePosition;
-            Ray ray = HandleUtility.GUIPointToWorldRay(mousePosition);
-            
-            float layerY = targetLayer.transform.position.y;
-            Plane plane = new Plane(Vector3.up, new Vector3(0, layerY, 0));
-            float distance;
-
-            if (plane.Raycast(ray, out distance))
-            {
-                Vector3 hitPoint = ray.GetPoint(distance);
-                
-                Vector3 worldPos = new Vector3(hitPoint.x, 0f, hitPoint.z);
-                Vector3Int cellPosition = grid.WorldToCell(worldPos);
-                cellPosition.y = 0;
-
-                bool occupied = IsCellOccupied(cellPosition);
-                // В режиме стирания клик что-то делает только если в клетке ЕСТЬ тайл.
-                // В обычном режиме клик разрешён и на пустой, и на занятой клетке -
-                // повторный клик по уже занятой клетке того же типа переключает
-                // визуальный вариант тайла (см. PaintLevelTile), а не ставит новый.
-                bool cellValid = isErasing ? occupied : true;
-                
-                // В Environment-режиме подсветка следует точно за курсором внутри
-                // клетки (свободное размещение, не по центру), поэтому обновляем
-                // её каждый кадр, даже если клетка не изменилась.
-                bool needHighlightUpdate = cellPosition != lastHighlightedCell || cellValid != lastCellValid || isErasing != lastErasing || paintMode == "Environment";
-
-                if (needHighlightUpdate)
-                {
-                    lastHighlightedCell = cellPosition;
-                    lastCellValid = cellValid;
-                    lastErasing = isErasing;
-
-                    if (isErasing)
-                    {
-                        // В режиме стирания всегда показываем красный курсор
-                        ClearEnvironmentPreview();
-                        UpdateHighlight(cellPosition, worldPos, showRed: true);
-                    }
-                    else if (occupied)
-                    {
-                        // Занятую клетку в обычном режиме больше не подсвечиваем красным - просто ничего не показываем
-                        ClearHighlights();
-                        ClearEnvironmentPreview();
-                    }
-                    else if (paintMode == "Environment")
-                    {
-                        // Вместо зелёного квадрата показываем сам выбранный префаб -
-                        // сразу видно, что и куда встанет.
-                        ClearHighlights();
-                        UpdateEnvironmentPreview(cellPosition, worldPos);
-                    }
-                    else
-                    {
-                        UpdateHighlight(cellPosition, worldPos, showRed: false);
-                    }
-                }
-
-                if (e.type == EventType.MouseDown && e.button == 0 && !isAltPressed)
-                {
-                    isMouseDown = true;
-                    paintedCellsInSession.Clear();
-                    
-                    if (cellValid)
-                    {
-                        if (isErasing)
-                            EraseTile(cellPosition);
-                        else
-                            PaintTile(cellPosition, worldPos);
-                        lastPaintedCell = cellPosition;
-                        paintedCellsInSession.Add(cellPosition);
-                    }
-                    e.Use();
-                }
-                
-                if (e.type == EventType.MouseUp && e.button == 0)
-                {
-                    isMouseDown = false;
-                    paintedCellsInSession.Clear();
-                    e.Use();
-                }
-                
-                if (e.type == EventType.MouseDrag && e.button == 0 && paintOnDrag && !isAltPressed)
-                {
-                    if (cellValid && cellPosition != lastPaintedCell)
-                    {
-                        if (Time.realtimeSinceStartup - lastPaintTime >= paintInterval)
-                        {
-                            if (!paintedCellsInSession.Contains(cellPosition))
-                            {
-                                if (isErasing)
-                                    EraseTile(cellPosition);
-                                else
-                                    PaintTile(cellPosition, worldPos);
-                                lastPaintedCell = cellPosition;
-                                paintedCellsInSession.Add(cellPosition);
-                                lastPaintTime = Time.realtimeSinceStartup;
-                            }
-                        }
-                    }
-                    e.Use();
-                }
+                Layer envLayer = level.GetEnvironmentLayer();
+                targetLayer = envLayer != null ? envLayer : groundLayer;
             }
             else
             {
-                if (lastHighlightedCell != new Vector3Int(-999, -999, -999))
+                targetLayer = currentTileType == "Liquid"
+                    ? level.GetLiquidLayer()
+                    : groundLayer;
+
+                if (targetLayer != null)
+                    targetLayer.EnsureGrid();
+            }
+
+            Event e = Event.current;
+            bool isAltPressed = e.alt || e.command;
+            bool isErasing = e.control;
+
+            // Alt = camera navigation
+            if (isAltPressed)
+            {
+                ClearHighlights();
+                ClearEnvironmentPreview();
+                lastHighlightedCell = new Vector3Int(-999, -999, -999);
+                return;
+            }
+
+            // ========================================================
+            // SHIFT ЗАЖАТ → ПРЕФАБ КРУТИТСЯ ПО ЧАСОВОЙ
+            // ========================================================
+            if (paintMode == "Environment" && e.shift && !e.control && !e.alt && !e.command)
+            {
+                environmentRandomRotation = false;
+                currentPreviewRotation += ShiftRotationSpeed * Time.deltaTime;
+                currentPreviewRotation = Mathf.Repeat(currentPreviewRotation, 360f);
+                environmentRotation = currentPreviewRotation;
+
+                if (environmentPreviewObject != null)
                 {
-                    lastHighlightedCell = new Vector3Int(-999, -999, -999);
+                    environmentPreviewObject.transform.rotation =
+                        Quaternion.Euler(0f, currentPreviewRotation, 0f);
+                }
+
+                e.Use();
+                sceneView.Repaint();
+            }
+
+            // Mouse ray
+            Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
+            float groundY = groundLayer.transform.position.y;
+            Plane plane = new Plane(Vector3.up, new Vector3(0f, groundY, 0f));
+
+            if (!plane.Raycast(ray, out float distance))
+            {
+                ClearHighlights();
+                ClearEnvironmentPreview();
+                lastHighlightedCell = new Vector3Int(-999, -999, -999);
+                sceneView.Repaint();
+                return;
+            }
+
+            Vector3 hitPoint = ray.GetPoint(distance);
+            Vector3 worldPos = new Vector3(hitPoint.x, groundY, hitPoint.z);
+            Vector3Int cellPosition = grid.WorldToCell(worldPos);
+            cellPosition.y = 0;
+
+            bool occupied = paintMode != "Environment" &&
+                            targetLayer != null &&
+                            targetLayer.IsCellOccupiedInThisLayer(cellPosition);
+
+            bool cellValid = paintMode == "Environment" || (isErasing ? occupied : true);
+
+            // Highlight / Preview
+            bool needUpdate = cellPosition != lastHighlightedCell ||
+                              cellValid != lastCellValid ||
+                              isErasing != lastErasing ||
+                              paintMode == "Environment";
+
+            if (needUpdate)
+            {
+                lastHighlightedCell = cellPosition;
+                lastCellValid = cellValid;
+                lastErasing = isErasing;
+
+                if (isErasing)
+                {
+                    ClearEnvironmentPreview();
+                    UpdateHighlight(cellPosition, groundLayer, true);
+                }
+                else if (paintMode == "Environment")
+                {
+                    ClearHighlights();
+                    UpdateEnvironmentPreview(cellPosition, worldPos, groundLayer);
+                }
+                else if (occupied)
+                {
                     ClearHighlights();
                     ClearEnvironmentPreview();
                 }
-                
-                if (e.type == EventType.MouseUp && e.button == 0)
+                else
                 {
-                    isMouseDown = false;
-                    paintedCellsInSession.Clear();
+                    UpdateHighlight(cellPosition, groundLayer, false);
                 }
+            }
+
+            // Mouse Down
+            if (e.type == EventType.MouseDown && e.button == 0)
+            {
+                isMouseDown = true;
+                paintedCellsInSession.Clear();
+
+                if (cellValid)
+                {
+                    if (isErasing)
+                        EraseTile(cellPosition, worldPos, groundLayer);
+                    else
+                        PaintTile(cellPosition, worldPos, groundLayer);
+
+                    lastPaintedCell = cellPosition;
+                    paintedCellsInSession.Add(cellPosition);
+                    lastPaintTime = Time.realtimeSinceStartup;
+                }
+                e.Use();
+            }
+
+            // Mouse Up
+            if (e.type == EventType.MouseUp && e.button == 0)
+            {
+                isMouseDown = false;
+                paintedCellsInSession.Clear();
+                e.Use();
+            }
+
+            // Mouse Drag
+            if (e.type == EventType.MouseDrag && e.button == 0 && paintOnDrag)
+            {
+                if (cellValid &&
+                    cellPosition != lastPaintedCell &&
+                    Time.realtimeSinceStartup - lastPaintTime >= paintInterval &&
+                    !paintedCellsInSession.Contains(cellPosition))
+                {
+                    if (isErasing)
+                        EraseTile(cellPosition, worldPos, groundLayer);
+                    else
+                        PaintTile(cellPosition, worldPos, groundLayer);
+
+                    lastPaintedCell = cellPosition;
+                    paintedCellsInSession.Add(cellPosition);
+                    lastPaintTime = Time.realtimeSinceStartup;
+                }
+                e.Use();
             }
 
             sceneView.Repaint();
         }
-        
+
+        // ============================================================
+        // CLEAR
+        // ============================================================
         public void ClearAll()
         {
             ClearHighlights();
@@ -209,80 +266,165 @@ namespace TileWorldCreator
             isMouseDown = false;
             paintedCellsInSession.Clear();
 
-            // Очистим кэшированный материал
             if (highlightMaterial != null)
             {
                 Object.DestroyImmediate(highlightMaterial);
                 highlightMaterial = null;
             }
         }
-        
-        // ============ PRIVATE METHODS ============
-        
-        /// <summary>Занята ли клетка в текущем режиме рисования (Level: тайлом в этом слое, Environment: объектом окружения).</summary>
-        private bool IsCellOccupied(Vector3Int cellPosition)
+
+        private Level GetLevel()
         {
-            if (targetLayer == null) return false;
-            
-            if (paintMode == "Level")
+            // Всегда берём АКТИВНЫЙ Level из LevelsRoot
+            LevelsRoot levelsRoot =
+        #if UNITY_EDITOR
+                Object.FindObjectOfType<LevelsRoot>();
+        #else
+                Object.FindFirstObjectByType<LevelsRoot>();
+        #endif
+
+            if (levelsRoot != null)
             {
-                // ИСПРАВЛЕНО: Используем новый метод проверки ТОЛЬКО в этом слое
-                return targetLayer.IsCellOccupiedInThisLayer(cellPosition);
+                Level active = levelsRoot.GetActiveLevel();
+                if (active != null)
+                    return active;
+            }
+
+            // Fallback (если LevelsRoot нет)
+        #if UNITY_EDITOR
+            return Object.FindObjectOfType<Level>();
+        #else
+            return Object.FindFirstObjectByType<Level>();
+        #endif
+        }
+
+        // ============================================================
+        // TILE HEIGHT
+        // ============================================================
+        private float GetTileHeight(Vector3Int cellPosition, Layer groundLayer)
+        {
+            if (groundLayer == null) return 1f;
+            
+            Tile tile = groundLayer.GetTileAt(cellPosition);
+            if (tile != null)
+            {
+                // ВАРИАНТ 1: Если у Tile есть свойство Height
+                // if (tile.Height > 0)
+                //     return tile.Height;
+                
+                // ВАРИАНТ 2: Если у Tile есть метод GetHeight()
+                // return tile.GetHeight();
+                
+                // ВАРИАНТ 3: Если высота хранится в биоме тайла
+                // if (tile.Biome != null && tile.Biome.tileHeight > 0)
+                //     return tile.Biome.tileHeight;
+                
+                // ВАРИАНТ 4: Если высота - это просто Y позиция тайла
+                // return tile.transform.position.y - groundLayer.transform.position.y;
             }
             
-            return IsEnvironmentObjectAtCell(cellPosition);
+            // Если тайла нет, используем высоту из биома для превью
+            if (currentBiome != null && currentBiome.tileHeight > 0)
+                return currentBiome.tileHeight;
+            
+            return 1f;
         }
-        
-        private void UpdateHighlight(Vector3Int cellPosition, Vector3 rawWorldPos, bool showRed)
+
+        // ============================================================
+        // ПОЛУЧЕНИЕ ВЫСОТЫ ДЛЯ ХАЙЛАЙТА (С УЧЁТОМ НАЛИЧИЯ ТАЙЛА)
+        // ============================================================
+     // ============================================================
+// ============================================================
+// ПОЛУЧЕНИЕ ВЫСОТЫ ДЛЯ ХАЙЛАЙТА
+// ============================================================
+private float GetHighlightHeight(Vector3Int cellPosition, Layer groundLayer, bool isErasing)
+{
+    if (groundLayer == null) return 0f;
+    
+    float baseY = groundLayer.transform.position.y;
+    
+    // Проверяем наличие тайла
+    Tile tile = groundLayer.GetTileAt(cellPosition);
+    if (tile != null)
+    {
+        // Если тайл есть - поднимаемся на его высоту (для всех цветов)
+        float tileHeight = GetTileHeight(cellPosition, groundLayer);
+        return baseY + tileHeight + 0.02f;
+    }
+    
+    // Для Environment проверяем объекты окружения
+    if (paintMode == "Environment")
+    {
+        GameObject envObject = FindEnvironmentObjectAtCell(cellPosition);
+        if (envObject != null)
+        {
+            Bounds bounds = GetObjectBounds(envObject);
+            return bounds.center.y + bounds.extents.y + 0.02f;
+        }
+    }
+    
+    // Если ничего нет - на уровне земли
+    return baseY + 0.02f;
+}
+
+        private Bounds GetObjectBounds(GameObject obj)
+        {
+            Renderer renderer = obj.GetComponentInChildren<Renderer>();
+            if (renderer != null)
+                return renderer.bounds;
+            
+            // Если нет рендерера, используем позицию
+            return new Bounds(obj.transform.position, Vector3.one);
+        }
+
+        // ============================================================
+        // HIGHLIGHT
+        // ============================================================
+        private void UpdateHighlight(Vector3Int cellPosition, Layer gridLayer, bool showRed)
         {
             ClearHighlights();
+            if (gridLayer == null || gridLayer.Grid == null) return;
 
-            Vector3 worldPos;
-            if (paintMode == "Environment")
-            {
-                // Свободное размещение - подсветка идёт точно под курсором внутри
-                // клетки, а не привязана к её центру.
-                worldPos = rawWorldPos;
-            }
-            else
-            {
-                Vector3 localPos = targetLayer.GetCellCenterWorld(cellPosition);
-                worldPos = targetLayer.transform.TransformPoint(localPos);
-            }
-            // Ставим курсор НАД тайлом/объектом в клетке (а не под его мешем) - иначе его не видно,
-            // особенно в режиме стирания (Ctrl), когда клетка занята.
-            worldPos.y = GetHighlightWorldY(cellPosition);
+            Vector3 worldPos = gridLayer.Grid.GetCellCenterWorld(cellPosition);
             
+            // Получаем высоту для хайлайта с учётом режима (удаление/рисование)
+            float highlightY = GetHighlightHeight(cellPosition, gridLayer, showRed);
+            worldPos.y = highlightY;
+
             GameObject highlight = GameObject.CreatePrimitive(PrimitiveType.Quad);
             highlight.name = "GridHighlight";
             highlight.transform.position = worldPos;
-            highlight.transform.rotation = Quaternion.Euler(90, 0, 0);
+            highlight.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
 
-            Vector3 cellSize = Vector3.one;
-            if (targetLayer.Grid != null)
-                cellSize = targetLayer.Grid.cellSize;
-
-            highlight.transform.localScale = new Vector3(cellSize.x, cellSize.z, 1);
+            Vector3 cellSize = gridLayer.Grid.cellSize;
+            highlight.transform.localScale = new Vector3(cellSize.x, cellSize.z, 1f);
 
             Renderer renderer = highlight.GetComponent<Renderer>();
-
             if (highlightMaterial == null)
             {
-                Shader shader = Shader.Find("Unlit/Color");
-                highlightMaterial = new Material(shader ?? Shader.Find("Sprites/Default"));
-                highlightMaterial.hideFlags = HideFlags.HideAndDontSave;
+                Shader shader = Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default");
+                highlightMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
             }
 
-            // Меняем цвет кэширующегося материала
             highlightMaterial.color = showRed ? invalidColor : validColor;
             renderer.sharedMaterial = highlightMaterial;
-
             highlight.hideFlags = HideFlags.HideAndDontSave;
             highlightedObjects.Add(highlight);
         }
-        
-        /// <summary>Показывает превью реального выбранного префаба на месте курсора вместо квадрата.</summary>
-        private void UpdateEnvironmentPreview(Vector3Int cellPosition, Vector3 worldPos)
+
+        private void ClearHighlights()
+        {
+            foreach (var obj in highlightedObjects)
+                if (obj != null)
+                    Object.DestroyImmediate(obj);
+
+            highlightedObjects.Clear();
+        }
+
+        // ============================================================
+        // ENVIRONMENT PREVIEW
+        // ============================================================
+        private void UpdateEnvironmentPreview(Vector3Int cellPosition, Vector3 rawWorldPos, Layer groundLayer)
         {
             if (environmentBiome == null)
             {
@@ -290,15 +432,14 @@ namespace TileWorldCreator
                 return;
             }
 
-            if (environmentPreviewObject == null || environmentPreviewCategory != environmentCategory)
+            bool categoryChanged = environmentPreviewCategory != environmentCategory;
+
+            if (environmentPreviewObject == null || categoryChanged)
             {
                 ClearEnvironmentPreview();
+
                 GameObject prefab = environmentBiome.GetRandomEnvironmentObject(environmentCategory);
-                if (prefab == null)
-                {
-                    ClearEnvironmentPreview();
-                    return;
-                }
+                if (prefab == null) return;
 
                 environmentPreviewObject = Object.Instantiate(prefab);
                 environmentPreviewObject.name = "EnvironmentPreview";
@@ -306,50 +447,47 @@ namespace TileWorldCreator
                 environmentPreviewSourcePrefab = prefab;
                 environmentPreviewCategory = environmentCategory;
 
-                foreach (Collider col in environmentPreviewObject.GetComponentsInChildren<Collider>())
+                foreach (var col in environmentPreviewObject.GetComponentsInChildren<Collider>())
                     col.enabled = false;
+
+                currentPreviewRotation = environmentRandomRotation
+                    ? Random.Range(0f, 360f)
+                    : environmentRotation;
             }
 
-            worldPos.y = GetTileTopWorldY(cellPosition);
-            environmentPreviewObject.transform.position = worldPos;
+            Vector3 position = rawWorldPos;
+            position.y = GetTileTopWorldY(cellPosition, groundLayer);
+            environmentPreviewObject.transform.position = position;
+
+            if (environmentRotationEnabled)
+                environmentPreviewObject.transform.rotation = Quaternion.Euler(0f, currentPreviewRotation, 0f);
+
+            if (environmentScaleEnabled && environmentPreviewSourcePrefab != null)
+                environmentPreviewObject.transform.localScale =
+                    environmentPreviewSourcePrefab.transform.localScale * environmentScale;
         }
 
         private void ClearEnvironmentPreview()
         {
             if (environmentPreviewObject != null)
                 Object.DestroyImmediate(environmentPreviewObject);
+
             environmentPreviewObject = null;
             environmentPreviewSourcePrefab = null;
             environmentPreviewCategory = null;
         }
 
-        private void ClearHighlights()
+        // ============================================================
+        // ERASE
+        // ============================================================
+        private void EraseTile(Vector3Int cellPosition, Vector3 worldPos, Layer groundLayer)
         {
-            foreach (GameObject obj in highlightedObjects)
-            {
-                if (obj != null)
-                {
-                    Object.DestroyImmediate(obj);
-                }
-            }
-            highlightedObjects.Clear();
-        }
-        
-        /// <summary>Стирание тайла/объекта окружения под курсором (Ctrl зажат) - делает "дыру" в уровне.</summary>
-        private void EraseTile(Vector3Int cellPosition)
-        {
-            if (targetLayer == null) return;
-
             try
             {
                 if (paintMode == "Level")
-                {
                     EraseLevelTile(cellPosition);
-                }
-                else if (paintMode == "Environment")
-                {
-                    EraseEnvironmentObject(cellPosition);
-                }
+                else
+                    EraseEnvironmentObject(cellPosition, worldPos);
             }
             catch (System.Exception ex)
             {
@@ -365,62 +503,75 @@ namespace TileWorldCreator
             if (tile == null) return;
 
             string tileType = tile.TileType;
-
             targetLayer.Tiles.Remove(tile);
             targetLayer.DestroyTile(tile);
-
-            // Дырка могла изменить внешность окружающих display-клеток дуальной сетки.
-            targetLayer.RefreshDualDisplayAround(cellPosition, tileType, currentBiome);
+            targetLayer.RefreshDualDisplayAround(cellPosition, currentBiome, tileType);
         }
 
-        private void EraseEnvironmentObject(Vector3Int cellPosition)
+        private void EraseEnvironmentObject(Vector3Int cellPosition, Vector3 worldPos)
         {
-            if (targetLayer == null) return;
-
-            WorldRoot worldRoot = targetLayer.GetComponentInParent<WorldRoot>();
+            WorldRoot worldRoot = FindWorldRoot();
             if (worldRoot == null) return;
 
             EnvironmentRoot envRoot = worldRoot.Environment;
             if (envRoot == null) return;
 
-            GameObject closest = FindEnvironmentObjectAtCell(cellPosition);
+            GameObject closest = null;
+            float closestDistance = float.MaxValue;
+
+            foreach (var obj in envRoot.EnvironmentObjects)
+            {
+                if (obj == null) continue;
+
+                var marker = obj.GetComponent<EnvironmentObjectMarker>();
+                if (marker == null) continue;
+                if (marker.CellPosition.x != cellPosition.x || marker.CellPosition.z != cellPosition.z)
+                    continue;
+
+                float distance = Vector2.Distance(
+                    new Vector2(obj.transform.position.x, obj.transform.position.z),
+                    new Vector2(worldPos.x, worldPos.z));
+
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    closest = obj;
+                }
+            }
 
             if (closest != null)
             {
                 envRoot.EnvironmentObjects.Remove(closest);
 
-#if UNITY_EDITOR
+        #if UNITY_EDITOR
                 if (!Application.isPlaying)
-                    UnityEditor.Undo.DestroyObjectImmediate(closest);
+                    Undo.DestroyObjectImmediate(closest);
                 else
                     Object.Destroy(closest);
-#else
+        #else
                 Object.Destroy(closest);
-#endif
+        #endif
             }
         }
 
-        private void PaintTile(Vector3Int cellPosition, Vector3 rawWorldPos)
+        // ============================================================
+        // PAINT
+        // ============================================================
+        private void PaintTile(Vector3Int cellPosition, Vector3 rawWorldPos, Layer groundLayer)
         {
-            if (targetLayer == null) return;
-            
             try
             {
                 if (paintMode == "Level")
-                {
                     PaintLevelTile(cellPosition);
-                }
-                else if (paintMode == "Environment")
-                {
-                    PaintEnvironment(cellPosition, rawWorldPos);
-                }
+                else
+                    PaintEnvironment(cellPosition, rawWorldPos, groundLayer);
             }
             catch (System.Exception ex)
             {
                 Debug.LogError($"Error painting tile: {ex.Message}");
             }
         }
-        
+
         private void PaintLevelTile(Vector3Int cellPosition)
         {
             if (targetLayer == null) return;
@@ -428,205 +579,252 @@ namespace TileWorldCreator
             Tile existing = targetLayer.GetTileAt(cellPosition);
             if (existing != null)
             {
-                // Клетка уже занята. Если это тот же тип тайла - переключаем
-                // визуальный вариант (следующий префаб из пула), чтобы соседние
-                // тайлы одного типа не выглядели одинаково. Другой тип поверх
-                // существующего тайла клик не ставит.
                 if (existing.TileType == currentTileType)
                 {
                     existing.CycleVariant();
-                    targetLayer.RefreshDualDisplayAround(cellPosition, currentTileType, currentBiome);
+                    targetLayer.RefreshDualDisplayAround(cellPosition, currentBiome, currentTileType);
                 }
                 return;
             }
 
-            // Логический тайл - это просто маркер занятости клетки, без
-            // собственного меша: вся видимая геометрия строится отдельно
-            // на дуальной (смещённой на пол-клетки) сетке display-тайлов.
-            Tile t = targetLayer.CreateTile(cellPosition, currentTileType);
-            if (t != null)
+            Tile tile = targetLayer.CreateTile(cellPosition, currentTileType);
+            if (tile != null)
             {
-                if (!targetLayer.Tiles.Contains(t))
-                    targetLayer.Tiles.Add(t);
+                if (!targetLayer.Tiles.Contains(tile))
+                    targetLayer.Tiles.Add(tile);
 
-                // Пересчитываем 4 display-клетки дуальной сетки, которые
-                // затрагивает эта логическая клетка.
-                targetLayer.RefreshDualDisplayAround(cellPosition, currentTileType, currentBiome);
+                targetLayer.RefreshDualDisplayAround(cellPosition, currentBiome, currentTileType);
             }
         }
-        
-        private void PaintEnvironment(Vector3Int cellPosition, Vector3 rawWorldPos)
+
+        private void PaintEnvironment(Vector3Int cellPosition, Vector3 rawWorldPos, Layer groundLayer)
         {
-            if (targetLayer == null) return;
-            
-            if (IsEnvironmentObjectAtCell(cellPosition))
-            {
-                return;
-            }
-            
             if (environmentBiome == null)
             {
-                Debug.LogWarning("⚠️ No environment biome selected!");
+                Debug.LogWarning("No environment biome selected!");
                 return;
             }
-            
-            GameObject prefab = environmentBiome.GetRandomEnvironmentObject(environmentCategory);
+
+            // Используем тот же префаб, что и в preview
+            GameObject prefab = environmentPreviewSourcePrefab
+                                ?? environmentBiome.GetRandomEnvironmentObject(environmentCategory);
+
             if (prefab == null)
             {
-                Debug.LogWarning($"⚠️ No objects in category '{environmentCategory}' for biome '{environmentBiome.displayName}'!");
+                Debug.LogWarning($"No objects in category '{environmentCategory}'");
                 return;
             }
-            
-            WorldRoot worldRoot = targetLayer.GetComponentInParent<WorldRoot>();
+
+            WorldRoot worldRoot = FindWorldRoot();
             if (worldRoot == null)
             {
-                Debug.LogWarning("⚠️ WorldRoot not found!");
+                Debug.LogWarning("WorldRoot not found!");
                 return;
             }
-            
+
             EnvironmentRoot envRoot = worldRoot.Environment;
             if (envRoot == null)
             {
-                GameObject envObject = new GameObject("Environment");
-                envObject.transform.SetParent(worldRoot.transform);
-                envRoot = envObject.AddComponent<EnvironmentRoot>();
+                Transform existing = worldRoot.transform.Find("Environment");
+                if (existing != null)
+                    envRoot = existing.GetComponent<EnvironmentRoot>();
+
+                if (envRoot == null)
+                {
+                    GameObject envObject = new GameObject("Environment");
+                    envObject.transform.SetParent(worldRoot.transform, false);
+                    envRoot = envObject.AddComponent<EnvironmentRoot>();
+                }
             }
-            
-            // Свободное размещение: X/Z берём прямо из точки клика (не по центру
-            // клетки), а Y - поверх tile (см. GetHighlightWorldY/GetTileTopWorldY),
-            // а не на уровне земли под его мешем.
+
             Vector3 worldPos = rawWorldPos;
-            worldPos.y = GetTileTopWorldY(cellPosition);
-            
+            worldPos.y = GetTileTopWorldY(cellPosition, groundLayer);
+
             GameObject obj = Object.Instantiate(prefab);
-            obj.transform.position = worldPos;
             obj.transform.SetParent(envRoot.transform, true);
+            obj.transform.position = worldPos;
             obj.name = $"{prefab.name}_{envRoot.EnvironmentObjects.Count}";
 
-            EnvironmentObjectMarker marker = obj.GetComponent<EnvironmentObjectMarker>();
-            if (marker == null)
-                marker = obj.AddComponent<EnvironmentObjectMarker>();
+            var marker = obj.GetComponent<EnvironmentObjectMarker>()
+                         ?? obj.AddComponent<EnvironmentObjectMarker>();
             marker.Initialize(cellPosition);
-            
-            if (environmentBiome.randomRotation)
-            {
-                obj.transform.rotation = Quaternion.Euler(0, Random.Range(0f, 360f), 0);
-            }
-            
-            float scale = Random.Range(environmentBiome.randomScaleRange.x, environmentBiome.randomScaleRange.y);
-            obj.transform.localScale = Vector3.one * scale;
-            
-            envRoot.EnvironmentObjects.Add(obj);
-            
-#if UNITY_EDITOR
+
+            // Ротация — точно как в preview
+            if (environmentRotationEnabled)
+                obj.transform.rotation = Quaternion.Euler(0f, currentPreviewRotation, 0f);
+
+            // Скейл
+            if (environmentScaleEnabled)
+                obj.transform.localScale = prefab.transform.localScale * environmentScale;
+
+            if (!envRoot.EnvironmentObjects.Contains(obj))
+                envRoot.EnvironmentObjects.Add(obj);
+
+        #if UNITY_EDITOR
             Undo.RegisterCreatedObjectUndo(obj, $"Place {environmentCategory}");
-#endif
+        #endif
         }
-        
+
+        // ============================================================
+        // FIND WORLD ROOT
+        // ============================================================
+        private WorldRoot FindWorldRoot()
+        {
+            if (targetLayer != null)
+            {
+                var root = targetLayer.GetComponentInParent<WorldRoot>();
+                if (root != null) return root;
+            }
+
+            Level level = GetLevel();
+            if (level != null)
+            {
+                var root = level.GetComponentInParent<WorldRoot>();
+                if (root != null) return root;
+            }
+
+        #if UNITY_EDITOR
+            return Object.FindObjectOfType<WorldRoot>();
+        #else
+            return Object.FindFirstObjectByType<WorldRoot>();
+        #endif
+        }
+
+        // ============================================================
+        // ENVIRONMENT OBJECT SEARCH
+        // ============================================================
         private bool IsEnvironmentObjectAtCell(Vector3Int cellPosition)
         {
             return FindEnvironmentObjectAtCell(cellPosition) != null;
         }
 
-        /// <summary>
-        /// Найти объект окружения, помеченный этой логической клеткой (см.
-        /// EnvironmentObjectMarker) - не зависит от его точной X/Z позиции,
-        /// т.к. объекты окружения ставятся свободно внутри клетки, а не по её центру.
-        /// </summary>
         private GameObject FindEnvironmentObjectAtCell(Vector3Int cellPosition)
         {
-            if (targetLayer == null) return null;
-
-            WorldRoot worldRoot = targetLayer.GetComponentInParent<WorldRoot>();
+            WorldRoot worldRoot = FindWorldRoot();
             if (worldRoot == null) return null;
 
             EnvironmentRoot envRoot = worldRoot.Environment;
             if (envRoot == null) return null;
 
-            foreach (GameObject obj in envRoot.EnvironmentObjects)
+            foreach (var obj in envRoot.EnvironmentObjects)
             {
                 if (obj == null) continue;
 
-                EnvironmentObjectMarker marker = obj.GetComponent<EnvironmentObjectMarker>();
-                if (marker != null && marker.CellPosition.x == cellPosition.x && marker.CellPosition.z == cellPosition.z)
+                var marker = obj.GetComponent<EnvironmentObjectMarker>();
+                if (marker != null &&
+                    marker.CellPosition.x == cellPosition.x &&
+                    marker.CellPosition.z == cellPosition.z)
                     return obj;
             }
-
             return null;
         }
 
-        /// <summary>
-        /// Мировая высота верхней поверхности tile в этой клетке (или уровня
-        /// слоя, если тайла там нет) - и подсветка, и объекты окружения должны
-        /// стоять НА НЕЙ, а не быть спрятаны под мешем тайла.
-        /// </summary>
-        private float GetTileTopWorldY(Vector3Int cellPosition)
+        // ============================================================
+        // TILE HEIGHT (FOR ENVIRONMENT PREVIEW)
+        // ============================================================
+        private float GetTileTopWorldY(Vector3Int cellPosition, Layer groundLayer)
         {
-            float baseY = targetLayer.transform.position.y;
+            if (groundLayer == null) return 0f;
 
-            // Логический Tile - это пустой маркер без меша (вся геометрия
-            // рисуется отдельно на смещённой dual-grid сетке), поэтому
-            // высоту его "поверхности" берём из настроек биома.
-            Tile tile = targetLayer.GetTileAt(cellPosition);
-            if (tile == null) return baseY;
-
-            float height = currentBiome != null ? currentBiome.tileHeight : 1f;
-            return baseY + height;
+            float baseY = groundLayer.transform.position.y;
+            float tileHeight = GetTileHeight(cellPosition, groundLayer);
+            return baseY + tileHeight;
         }
 
-        /// <summary>
-        /// Высота (мировая Y), на которой нужно рисовать курсор-подсветку, чтобы он был виден
-        /// НАД тайлом в клетке, а не спрятан под его мешем.
-        /// </summary>
-        private float GetHighlightWorldY(Vector3Int cellPosition)
-        {
-            return GetTileTopWorldY(cellPosition) + 0.02f;
-        }
-        
-        // ============ HELPER METHODS ============
-        
-        public void SetTargetLayer(Layer layer)
-        {
-            targetLayer = layer;
-        }
-        
-        public void SetBiome(TileBiomeData biome)
-        {
-            currentBiome = biome;
-        }
-        
+        // ============================================================
+        // HELPERS
+        // ============================================================
+        public void SetTargetLayer(Layer layer) => targetLayer = layer;
+
+        public void SetBiome(TileBiomeData biome) => currentBiome = biome;
+
         public void SetTileType(string type)
         {
             currentTileType = type;
+            ClearHighlights();
+
+            Level level = GetLevel();
+            if (level == null) return;
+
+            targetLayer = currentTileType == "Liquid"
+                ? level.GetLiquidLayer()
+                : level.GetGroundLayer();
+
+            if (targetLayer != null)
+                targetLayer.EnsureGrid();
         }
-        
+
         public void SetEnvironmentBiome(TileBiomeData biome)
         {
             environmentBiome = biome;
+            ClearEnvironmentPreview();
+            currentPreviewRotation = environmentRotation;
         }
-        
+
         public void SetEnvironmentCategory(string category)
         {
             environmentCategory = category;
+            ClearEnvironmentPreview();
         }
-        
+
         public void SetPaintMode(string mode)
         {
             paintMode = mode;
+            ClearHighlights();
+            ClearEnvironmentPreview();
+            lastHighlightedCell = new Vector3Int(-999, -999, -999);
+
+            Level level = GetLevel();
+            if (level == null) return;
+
+            if (paintMode == "Environment")
+            {
+                Layer envLayer = level.GetEnvironmentLayer();
+                targetLayer = envLayer != null ? envLayer : level.GetGroundLayer();
+            }
+            else if (currentTileType == "Liquid")
+            {
+                targetLayer = level.GetLiquidLayer();
+            }
+            else
+            {
+                targetLayer = level.GetGroundLayer();
+            }
+
+            if (targetLayer != null)
+                targetLayer.EnsureGrid();
         }
-        
+
         public void SetActive(bool active)
         {
             isActive = active;
             if (!active)
             {
                 ClearAll();
+                return;
             }
+
+            Level level = GetLevel();
+            if (level == null) return;
+
+            if (paintMode == "Environment")
+            {
+                Layer envLayer = level.GetEnvironmentLayer();
+                targetLayer = envLayer != null ? envLayer : level.GetGroundLayer();
+            }
+            else if (currentTileType == "Liquid")
+            {
+                targetLayer = level.GetLiquidLayer();
+            }
+            else
+            {
+                targetLayer = level.GetGroundLayer();
+            }
+
+            if (targetLayer != null)
+                targetLayer.EnsureGrid();
         }
-        
-        public void LoadBiomes()
-        {
-            // Метод для совместимости с UI
-        }
+
+        public void LoadBiomes() { }
     }
 }

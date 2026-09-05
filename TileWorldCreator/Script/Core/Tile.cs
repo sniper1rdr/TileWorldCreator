@@ -14,24 +14,21 @@ namespace TileWorldCreator
         public string TileType => tileType;
 
         /// <summary>
-        /// Определяет, какой конкретный префаб из пула выбирается для
-        /// display-клеток дуальной сетки, на которые влияет этот тайл (см.
-        /// Layer.RefreshDualDisplayCell). Каждый новый тайл получает
-        /// случайное значение при создании, чтобы одинаковые тайлы рядом не
-        /// выглядели одинаково; CycleVariant() позволяет вручную переключить
-        /// вариант повторным кликом по уже занятой клетке.
+        /// Определяет, какой префаб из пула выбирается для display-клеток
+        /// дуальной сетки. Каждый новый тайл получает случайное значение,
+        /// CycleVariant() позволяет переключить вариант повторным кликом.
         /// </summary>
         public int VariantSeed => variantSeed;
 
         public void Initialize(Vector3Int position, string type = "Default")
         {
-            // Сохраняем только X и Z, Y всегда 0
+            // Сохраняем только X и Z, Y всегда 0 (логическая клетка)
             cellPosition = new Vector3Int(position.x, 0, position.z);
             tileType = type;
             variantSeed = Random.Range(0, 9973);
         }
 
-        /// <summary>Переключает визуальный вариант тайла на следующий в пуле префабов.</summary>
+        /// <summary>Переключает визуальный вариант тайла на следующий.</summary>
         public void CycleVariant()
         {
             variantSeed++;
@@ -42,30 +39,25 @@ namespace TileWorldCreator
             tileType = type;
         }
 
-        /// <summary>
-        /// Получить родительский слой
-        /// </summary>
         public Layer GetLayer()
         {
             return GetComponentInParent<Layer>();
         }
 
         /// <summary>
-        /// Получить мировую позицию тайла (только X и Z)
+        /// Мировая позиция тайла (с реальной высотой).
         /// </summary>
         public Vector3 GetWorldPosition()
         {
-            Vector3 pos = transform.position;
-            return new Vector3(pos.x, 0f, pos.z);
+            return transform.position;
         }
-        
+
         /// <summary>
-        /// Получить локальную позицию тайла (только X и Z)
+        /// Локальная позиция тайла (с реальной высотой).
         /// </summary>
         public Vector3 GetLocalPosition()
         {
-            Vector3 pos = transform.localPosition;
-            return new Vector3(pos.x, 0f, pos.z);
+            return transform.localPosition;
         }
     }
 }

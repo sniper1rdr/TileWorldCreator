@@ -1,5 +1,8 @@
 using UnityEngine;
 using System.Collections.Generic;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace TileWorldCreator
 {
@@ -18,72 +21,61 @@ namespace TileWorldCreator
         {
             GameObject levelObject = new GameObject(levelName);
             levelObject.transform.SetParent(transform, false);
-            
-            // УСТАНАВЛИВАЕМ Y ПОЗИЦИЮ УРОВНЯ
-            levelObject.transform.localPosition = new Vector3(0, yPosition, 0);
-            
+            levelObject.transform.localPosition = new Vector3(0f, yPosition, 0f);
+
             Level level = levelObject.AddComponent<Level>();
             level.Initialize(levelName, yPosition);
-            
+
             levels.Add(level);
             activeLevelIndex = levels.Count - 1;
 
 #if UNITY_EDITOR
             if (!Application.isPlaying)
             {
-                UnityEditor.Undo.RegisterCreatedObjectUndo(levelObject, "Create Level");
-                UnityEditor.Undo.RecordObject(this, "Add Level");
+                Undo.RegisterCreatedObjectUndo(levelObject, "Create Level");
+                Undo.RecordObject(this, "Add Level");
             }
 #endif
-
             return level;
         }
 
         public Level FindLevel(string levelName)
         {
-            return levels.Find(l => l.LevelName == levelName);
+            return levels.Find(l => l != null && l.LevelName == levelName);
         }
 
         public void RemoveLevel(Level level)
         {
-            if (level != null && levels.Contains(level))
-            {
-                levels.Remove(level);
-                if (activeLevelIndex >= levels.Count)
-                    activeLevelIndex = levels.Count - 1;
-                    
+            if (level == null || !levels.Contains(level)) return;
+
+            levels.Remove(level);
+            if (activeLevelIndex >= levels.Count)
+                activeLevelIndex = levels.Count - 1;
+
 #if UNITY_EDITOR
-                if (!Application.isPlaying)
-                    UnityEditor.Undo.DestroyObjectImmediate(level.gameObject);
-                else
+            if (!Application.isPlaying)
+                Undo.DestroyObjectImmediate(level.gameObject);
+            else
 #endif
-                    Destroy(level.gameObject);
-            }
+                Destroy(level.gameObject);
         }
 
         public void SetActiveLevel(int index)
         {
-            if (index >= 0 && index < levels.Count)
-            {
-                activeLevelIndex = index;
+            if (index < 0 || index >= levels.Count) return;
+            activeLevelIndex = index;
+
 #if UNITY_EDITOR
-                if (!Application.isPlaying)
-                    UnityEditor.Undo.RecordObject(this, "Set Active Level");
+            if (!Application.isPlaying)
+                Undo.RecordObject(this, "Set Active Level");
 #endif
-            }
         }
 
         public void SetActiveLevel(Level level)
         {
             int index = levels.IndexOf(level);
             if (index >= 0)
-            {
-                activeLevelIndex = index;
-#if UNITY_EDITOR
-                if (!Application.isPlaying)
-                    UnityEditor.Undo.RecordObject(this, "Set Active Level");
-#endif
-            }
+                SetActiveLevel(index);
         }
 
         public Level GetActiveLevel()
@@ -95,18 +87,19 @@ namespace TileWorldCreator
 
         public void ClearAllLevels()
         {
-            foreach (Level level in levels)
+            for (int i = levels.Count - 1; i >= 0; i--)
             {
-                if (level != null)
-                {
+                Level level = levels[i];
+                if (level == null) continue;
+
 #if UNITY_EDITOR
-                    if (!Application.isPlaying)
-                        UnityEditor.Undo.DestroyObjectImmediate(level.gameObject);
-                    else
+                if (!Application.isPlaying)
+                    Undo.DestroyObjectImmediate(level.gameObject);
+                else
 #endif
-                        Destroy(level.gameObject);
-                }
+                    Destroy(level.gameObject);
             }
+
             levels.Clear();
             activeLevelIndex = -1;
         }
@@ -114,11 +107,7 @@ namespace TileWorldCreator
         public Grid GetGrid()
         {
             WorldRoot worldRoot = GetComponentInParent<WorldRoot>();
-            if (worldRoot != null)
-            {
-                return worldRoot.EnsureGrid();
-            }
-            return null;
+            return worldRoot != null ? worldRoot.EnsureGrid() : null;
         }
     }
 }

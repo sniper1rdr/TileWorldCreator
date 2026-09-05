@@ -1,5 +1,8 @@
 using UnityEngine;
 using System.Collections.Generic;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace TileWorldCreator
 {
@@ -9,7 +12,7 @@ namespace TileWorldCreator
     {
         [SerializeField] private string levelName = "Level_01";
         [SerializeField] private List<Layer> layers = new List<Layer>();
-        [SerializeField] private int activeLayerIndex = -1;
+        [SerializeField] private int activeLayerIndex = 0;
 
         public string LevelName => levelName;
         public float Height => transform.position.y;
@@ -17,244 +20,249 @@ namespace TileWorldCreator
         public Layer ActiveLayer => GetActiveLayer();
         public int ActiveLayerIndex => activeLayerIndex;
 
+        // ---------------------------------------------------------
+        // INITIALIZE
+        // ---------------------------------------------------------
         public void Initialize(string name, float yPosition = 0f)
         {
             levelName = name;
-            
             Vector3 pos = transform.position;
             pos.y = yPosition;
             transform.position = pos;
-            
-            CreateDefaultLayer();
+            EnsureLayers();
         }
 
-        public void SetHeight(float newY)
+public void SetHeight(float newY)
+{
+    Vector3 pos = transform.position;
+    pos.y = newY;
+    transform.position = pos;
+
+    // Синхронизируем Grid по XZ с этим Level
+    SyncGridToThisLevel();
+}
+
+private void SyncGridToThisLevel()
+{
+    Grid grid = GetGrid();
+    if (grid == null) return;
+
+    Vector3 gridPos = grid.transform.position;
+    gridPos.x = transform.position.x;
+    gridPos.z = transform.position.z;
+    // Y Grid’а оставляем как есть (или тоже можно синхронизировать)
+    grid.transform.position = gridPos;
+}
+
+        // ---------------------------------------------------------
+        // LAYERS
+        // ---------------------------------------------------------
+        public void EnsureLayers()
         {
-            Vector3 pos = transform.position;
-            pos.y = newY;
-            transform.position = pos;
+            CleanupLayerList();
+
+            Layer ground = GetLayerByName("Ground") ?? CreateLayerInternal("Ground");
+            Layer liquid = GetLayerByName("Liquid") ?? CreateLayerInternal("Liquid");
+            Layer environment = GetLayerByName("Environment") ?? CreateLayerInternal("Environment");
+
+            layers.Clear();
+            layers.Add(ground);
+            layers.Add(liquid);
+            layers.Add(environment);
+
+            EnsureEnvironmentCategories(environment);
+
+            if (activeLayerIndex < 0 || activeLayerIndex >= layers.Count)
+                activeLayerIndex = 0;
         }
 
-        public Layer CreateLayer(string layerName = null)
+        private Layer CreateLayerInternal(string layerName)
         {
-            if (string.IsNullOrEmpty(layerName))
-            {
-                layerName = $"Layer_{layers.Count:00}";
-            }
-            
-            Layer existingLayer = GetLayerByName(layerName);
-            if (existingLayer != null)
-            {
-                int counter = 1;
-                string newName;
-                do
-                {
-                    newName = $"{layerName}_{counter}";
-                    counter++;
-                } while (GetLayerByName(newName) != null);
-                layerName = newName;
-            }
-
             GameObject layerObject = new GameObject(layerName);
             layerObject.transform.SetParent(transform, false);
             layerObject.transform.localPosition = Vector3.zero;
+            layerObject.transform.localRotation = Quaternion.identity;
+            layerObject.transform.localScale = Vector3.one;
 
             Layer layer = layerObject.AddComponent<Layer>();
             layer.Initialize(layerName);
-            
+
             Grid grid = GetGrid();
             if (grid != null)
-            {
                 layer.SetGrid(grid);
-            }
-
-            layers.Add(layer);
-            
-            if (layers.Count == 1)
-            {
-                activeLayerIndex = 0;
-            }
 
 #if UNITY_EDITOR
             if (!Application.isPlaying)
-            {
-                UnityEditor.Undo.RegisterCreatedObjectUndo(layerObject, "Create Layer");
-                UnityEditor.Undo.RecordObject(this, "Add Layer");
-            }
+                Undo.RegisterCreatedObjectUndo(layerObject, "Create " + layerName + " Layer");
 #endif
-
             return layer;
         }
 
-        public Layer CreateDefaultLayer()
+        private void CleanupLayerList()
         {
-            // Проверяем, есть ли уже Base Layer
-            Layer existing = GetLayerByName("Base Layer");
-            if (existing != null)
-            {
-                SetActiveLayer(existing);
-                return existing;
-            }
+            layers.RemoveAll(layer => layer == null);
+        }
 
-            // Создаем базовый слой
-            GameObject layerObject = new GameObject("Base Layer");
-            layerObject.transform.SetParent(transform, false);
-            layerObject.transform.localPosition = Vector3.zero;
+        // ---------------------------------------------------------
+        // ENVIRONMENT CATEGORIES
+        // ---------------------------------------------------------
+        private void EnsureEnvironmentCategories(Layer environment)
+        {
+            if (environment == null) return;
 
-            Layer layer = layerObject.AddComponent<Layer>();
-            layer.Initialize("Base Layer");
-            
-            Grid grid = GetGrid();
-            if (grid != null)
-            {
-                layer.SetGrid(grid);
-            }
+            CreateCategoryIfMissing(environment.transform, "Rocks");
+            CreateCategoryIfMissing(environment.transform, "Trees");
+            CreateCategoryIfMissing(environment.transform, "Vegetation");
+            CreateCategoryIfMissing(environment.transform, "Props");
+        }
 
-            layers.Add(layer);
-            activeLayerIndex = 0;
+        private Transform CreateCategoryIfMissing(Transform parent, string categoryName)
+        {
+            Transform existing = parent.Find(categoryName);
+            if (existing != null) return existing;
+
+            GameObject categoryObject = new GameObject(categoryName);
+            categoryObject.transform.SetParent(parent, false);
+            categoryObject.transform.localPosition = Vector3.zero;
+            categoryObject.transform.localRotation = Quaternion.identity;
+            categoryObject.transform.localScale = Vector3.one;
 
 #if UNITY_EDITOR
             if (!Application.isPlaying)
-            {
-                UnityEditor.Undo.RegisterCreatedObjectUndo(layerObject, "Create Layer");
-                UnityEditor.Undo.RecordObject(this, "Add Layer");
-            }
+                Undo.RegisterCreatedObjectUndo(categoryObject, "Create Environment Category");
 #endif
-
-            return layer;
+            return categoryObject.transform;
         }
 
-        public bool IsBaseLayer(Layer layer)
+        public Transform GetEnvironmentCategory(string category)
         {
-            if (layer == null) return false;
-            return layer.LayerName == "Base Layer";
+            Layer environment = GetEnvironmentLayer();
+            if (environment == null) return null;
+
+            EnsureEnvironmentCategories(environment);
+            return environment.transform.Find(category);
         }
 
-        public Layer GetBaseLayer()
+        public Transform GetEnvironmentCategory(EnvironmentCategory category)
         {
-            return GetLayerByName("Base Layer");
+            return GetEnvironmentCategory(category.ToString());
         }
 
+        // ---------------------------------------------------------
+        // STANDARD LAYERS
+        // ---------------------------------------------------------
+        public Layer GetGroundLayer() => GetLayerByName("Ground");
+        public Layer GetLiquidLayer() => GetLayerByName("Liquid");
+        public Layer GetEnvironmentLayer() => GetLayerByName("Environment");
+
+        // ---------------------------------------------------------
+        // LAYER ACCESS
+        // ---------------------------------------------------------
         public Layer GetLayer(int index)
         {
-            if (index >= 0 && index < layers.Count)
-                return layers[index];
-            return null;
+            return index >= 0 && index < layers.Count ? layers[index] : null;
         }
 
         public Layer GetLayerByName(string name)
         {
-            return layers.Find(l => l.LayerName == name);
+            if (string.IsNullOrEmpty(name)) return null;
+            return layers.Find(layer => layer != null && layer.LayerName == name);
         }
 
         public void SetActiveLayer(int index)
         {
-            if (index >= 0 && index < layers.Count)
-            {
-                activeLayerIndex = index;
+            if (index < 0 || index >= layers.Count) return;
+            activeLayerIndex = index;
+
 #if UNITY_EDITOR
-                if (!Application.isPlaying)
-                    UnityEditor.Undo.RecordObject(this, "Set Active Layer");
+            if (!Application.isPlaying)
+                Undo.RecordObject(this, "Set Active Layer");
 #endif
-            }
         }
 
         public void SetActiveLayer(Layer layer)
         {
+            if (layer == null) return;
             int index = layers.IndexOf(layer);
             if (index >= 0)
-            {
-                activeLayerIndex = index;
-#if UNITY_EDITOR
-                if (!Application.isPlaying)
-                    UnityEditor.Undo.RecordObject(this, "Set Active Layer");
-#endif
-            }
+                SetActiveLayer(index);
         }
 
-        public Layer GetActiveLayer()
+        public Layer GetActiveLayer() => GetLayer(activeLayerIndex);
+
+        // ---------------------------------------------------------
+        // TYPE HELPERS
+        // ---------------------------------------------------------
+        public Layer GetLayerForTileType(string tileType)
         {
-            return GetLayer(activeLayerIndex);
-        }
+            if (string.IsNullOrEmpty(tileType))
+                return GetGroundLayer();
 
-        public void RemoveLayer(Layer layer)
-        {
-            if (layer != null && layers.Contains(layer))
+            return tileType switch
             {
-                if (layers.Count <= 1)
-                {
-                    Debug.LogWarning("Cannot remove the last layer! Create a new layer first.");
-                    return;
-                }
-
-                // Не даем удалить базовый слой "Base Layer"
-                if (layer.LayerName == "Base Layer")
-                {
-                    Debug.LogWarning("Cannot remove the base layer 'Base Layer'!");
-#if UNITY_EDITOR
-                    UnityEditor.EditorUtility.DisplayDialog(
-                        "Cannot Remove",
-                        "Base layer 'Base Layer' cannot be removed!",
-                        "OK");
-#endif
-                    return;
-                }
-
-                layers.Remove(layer);
-                
-                if (activeLayerIndex >= layers.Count)
-                    activeLayerIndex = layers.Count - 1;
-                    
-#if UNITY_EDITOR
-                if (!Application.isPlaying)
-                    UnityEditor.Undo.DestroyObjectImmediate(layer.gameObject);
-                else
-#endif
-                    Destroy(layer.gameObject);
-            }
+                "Ground" => GetGroundLayer(),
+                "Liquid" => GetLiquidLayer(),
+                "Environment" => GetEnvironmentLayer(),
+                _ => GetGroundLayer()
+            };
         }
 
-        public void RemoveLayerAt(int index)
-        {
-            Layer layer = GetLayer(index);
-            if (layer != null)
-            {
-                RemoveLayer(layer);
-            }
-        }
-
-        public void ClearAllLayers()
-        {
-            foreach (Layer layer in layers)
-            {
-                if (layer != null)
-                {
-#if UNITY_EDITOR
-                    if (!Application.isPlaying)
-                        UnityEditor.Undo.DestroyObjectImmediate(layer.gameObject);
-                    else
-#endif
-                        Destroy(layer.gameObject);
-                }
-            }
-            layers.Clear();
-            activeLayerIndex = -1;
-        }
-
+        // ---------------------------------------------------------
+        // GRID
+        // ---------------------------------------------------------
         public Grid GetGrid()
         {
             LevelsRoot levelsRoot = GetComponentInParent<LevelsRoot>();
-            if (levelsRoot != null)
+            return levelsRoot != null ? levelsRoot.GetGrid() : null;
+        }
+
+        // ---------------------------------------------------------
+        // CLEAR / RENAME
+        // ---------------------------------------------------------
+        public void ClearAllLayers()
+        {
+            CleanupLayerList();
+            foreach (Layer layer in layers)
             {
-                return levelsRoot.GetGrid();
+                if (layer != null)
+                    layer.ClearAllTiles();
             }
-            return null;
         }
 
         public void Rename(string newName)
         {
+            if (string.IsNullOrEmpty(newName)) return;
             levelName = newName;
             gameObject.name = newName;
+        }
+
+        // ---------------------------------------------------------
+        // LEGACY COMPATIBILITY
+        // ---------------------------------------------------------
+        public Layer CreateDefaultLayer()
+        {
+            EnsureLayers();
+            return GetGroundLayer();
+        }
+
+        public bool IsBaseLayer(Layer layer) => layer == GetGroundLayer();
+        public Layer GetBaseLayer() => GetGroundLayer();
+
+        public Layer CreateLayer(string layerName = null)
+        {
+            Debug.LogWarning("Level.CreateLayer() is deprecated. Use Ground, Liquid or Environment layers.");
+            EnsureLayers();
+            return string.IsNullOrEmpty(layerName) ? GetGroundLayer() : GetLayerByName(layerName);
+        }
+
+        public void RemoveLayer(Layer layer)
+        {
+            Debug.LogWarning("Level.RemoveLayer() is disabled. Ground, Liquid and Environment layers are fixed.");
+        }
+
+        public void RemoveLayerAt(int index)
+        {
+            Debug.LogWarning("Level.RemoveLayerAt() is disabled. Ground, Liquid and Environment layers are fixed.");
         }
     }
 }

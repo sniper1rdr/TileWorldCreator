@@ -4,10 +4,9 @@ namespace TileWorldCreator
 {
     /// <summary>
     /// Marks a spawned prefab instance as belonging to the dual-grid VISUAL
-    /// tile at displayCellPosition for tileType - lets Layer find/replace it
-    /// again the next time that display cell needs to be re-evaluated (its 4
-    /// sampled logical corner cells changed). Purely a visual marker - it
-    /// carries no painted/occupancy meaning by itself (see Tile for that).
+    /// tile at displayCellPosition for tileType. Lets Layer find/replace it
+    /// when that display cell needs re-evaluation. Purely a visual marker —
+    /// no occupancy meaning (see Tile for that).
     /// </summary>
     [AddComponentMenu("TileWorld/Core/Dual Display Tile")]
     [ExecuteAlways]

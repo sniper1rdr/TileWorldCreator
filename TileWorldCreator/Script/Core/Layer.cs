@@ -1,441 +1,508 @@
 using UnityEngine;
 using System.Collections.Generic;
-
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
 
 namespace TileWorldCreator
 {
+    public enum LayerType
+    {
+        Ground,
+        Liquid,
+        Environment
+    }
+
+    public enum EnvironmentCategory
+    {
+        Rocks,
+        Trees,
+        Vegetation,
+        Props
+    }
+
     [AddComponentMenu("TileWorld/Core/Layer")]
     [ExecuteAlways]
     public class Layer : MonoBehaviour
     {
-        [SerializeField] private string layerName = "Ground_01";
+        [SerializeField] private string layerName = "Ground";
+        [SerializeField] private LayerType layerType = LayerType.Ground;
         [SerializeField] private Grid grid;
         [SerializeField] private List<Tile> tiles = new List<Tile>();
         [SerializeField] private List<DualDisplayTile> displayTiles = new List<DualDisplayTile>();
 
         public string LayerName => layerName;
+        public LayerType Type => layerType;
         public Grid Grid => grid;
         public List<Tile> Tiles => tiles;
+        public List<DualDisplayTile> DisplayTiles => displayTiles;
 
-        public void Initialize(string name)
+        public bool IsGround => layerType == LayerType.Ground;
+        public bool IsLiquid => layerType == LayerType.Liquid;
+        public bool IsEnvironment => layerType == LayerType.Environment;
+
+        public static readonly Vector3Int[] DualDisplayOffsets =
+        {
+            new Vector3Int(0, 0, 0),
+            new Vector3Int(1, 0, 0),
+            new Vector3Int(0, 0, 1),
+            new Vector3Int(1, 0, 1)
+        };
+
+        // =========================================================
+        // INITIALIZE
+        // =========================================================
+        public void Initialize(string name, LayerType type = LayerType.Ground)
         {
             layerName = name;
-            EnsureGrid();
+            layerType = type;
+            gameObject.name = name;
+            EnsureEnvironmentCategories();
         }
 
-        public Grid EnsureGrid()
+        public void SetGrid(Grid newGrid) => grid = newGrid;
+
+        public void EnsureGrid()
         {
-            if (grid == null)
-            {
-                Level level = GetComponentInParent<Level>();
-                if (level != null)
-                {
-                    grid = level.GetGrid();
-                }
-                else
-                {
-                    WorldRoot worldRoot = GetComponentInParent<WorldRoot>();
-                    if (worldRoot != null)
-                    {
-                        grid = worldRoot.EnsureGrid();
-                    }
-                }
-
-                if (grid == null)
-                {
-                    grid = FindObjectOfType<Grid>();
-                }
-            }
-
-            return grid;
+            if (grid != null) return;
+            Level level = GetComponentInParent<Level>();
+            if (level != null)
+                grid = level.GetGrid();
         }
 
-        public void SetGrid(Grid newGrid)
+        // =========================================================
+        // ENVIRONMENT
+        // =========================================================
+        public Transform GetEnvironmentCategory(EnvironmentCategory category)
         {
-            grid = newGrid;
+            if (!IsEnvironment) return null;
+            EnsureEnvironmentCategories();
+            return transform.Find(category.ToString());
         }
 
-        // Теперь CreateTile поддерживает передачу префаба, чтобы избегать лишних создания/удаления объектов
-        public Tile CreateTile(Vector3Int cellPosition, string tileType = "Default", GameObject prefab = null)
+        public Transform GetEnvironmentCategory(string category)
         {
-            if (grid == null)
-            {
-                EnsureGrid();
-                if (grid == null)
-                {
-                    Debug.LogError($"Cannot create tile: No Grid found for Layer '{layerName}'");
-                    return null;
-                }
-            }
+            if (!IsEnvironment || string.IsNullOrEmpty(category)) return null;
+            EnsureEnvironmentCategories();
+            return transform.Find(category);
+        }
 
-            // Проверяем занята ли ячейка ТОЛЬКО В ЭТОМ СЛОЕ
-            if (IsCellOccupiedInThisLayer(cellPosition))
-            {
-                Debug.Log($"Cell {cellPosition.x}, {cellPosition.z} is already occupied in layer '{layerName}'!");
-                return null;
-            }
+        private void EnsureEnvironmentCategories()
+        {
+            if (!IsEnvironment) return;
+            CreateCategory("Rocks");
+            CreateCategory("Trees");
+            CreateCategory("Vegetation");
+            CreateCategory("Props");
+        }
 
-            // Получаем позицию от Grid
-            Vector3 gridPosition = grid.GetCellCenterWorld(cellPosition);
+        private Transform CreateCategory(string categoryName)
+        {
+            Transform existing = transform.Find(categoryName);
+            if (existing != null) return existing;
 
-            // Берем ТОЛЬКО X и Z, Y устанавливаем в позицию слоя
-            Vector3 localPos = new Vector3(gridPosition.x, 0f, gridPosition.z);
-            localPos = transform.InverseTransformPoint(localPos);
+            GameObject obj = new GameObject(categoryName);
+            obj.transform.SetParent(transform, false);
+            obj.transform.localPosition = Vector3.zero;
+            obj.transform.localRotation = Quaternion.identity;
+            obj.transform.localScale = Vector3.one;
 
-            GameObject tileObject = null;
-
-            if (prefab != null)
-            {
 #if UNITY_EDITOR
-                // Стараться использовать PrefabUtility в редакторе для сохранения связей
-                tileObject = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-                if (tileObject == null)
-                    tileObject = Object.Instantiate(prefab);
-                Undo.RegisterCreatedObjectUndo(tileObject, "Create Tile");
-#else
-                tileObject = Object.Instantiate(prefab);
+            if (!Application.isPlaying)
+                Undo.RegisterCreatedObjectUndo(obj, "Create Environment Category");
 #endif
-                tileObject.transform.SetParent(transform, false);
+            return obj.transform;
+        }
 
-                // Устанавливаем локальную позицию согласно ячейке
-                Vector3 worldPos = new Vector3(gridPosition.x, transform.position.y, gridPosition.z);
-                Vector3 local = transform.InverseTransformPoint(worldPos);
-                tileObject.transform.localPosition = new Vector3(local.x, 0f, local.z);
-                tileObject.name = $"Tile_{cellPosition.x}_{cellPosition.z}";
-            }
+      public Tile CreateTile(Vector3Int cellPosition, string tileType = "Default", GameObject prefab = null)
+{
+    EnsureGrid();
+    if (grid == null)
+    {
+        Debug.LogError($"Layer '{layerName}' has no Grid.");
+        return null;
+    }
+
+    if (IsCellOccupiedInThisLayer(cellPosition))
+        return GetTileAt(cellPosition);
+
+    Vector3 localPosition = GetCellCenterLocal(cellPosition);
+
+    // 1. Всегда создаём корневой объект с компонентом Tile
+    GameObject tileObject = new GameObject($"Tile_{cellPosition.x}_{cellPosition.y}_{cellPosition.z}");
+    tileObject.transform.SetParent(transform, false);
+    tileObject.transform.localPosition = localPosition;
+    tileObject.transform.localRotation = Quaternion.identity;
+    tileObject.transform.localScale = Vector3.one;
+
+    Tile tile = tileObject.AddComponent<Tile>();
+    tile.Initialize(cellPosition, tileType);
+
+    // 2. Если есть префаб — ставим его ВНУТРЬ как ребёнка
+    if (prefab != null)
+    {
+        GameObject visual;
+#if UNITY_EDITOR
+        if (!Application.isPlaying)
+            visual = (GameObject)PrefabUtility.InstantiatePrefab(prefab, tileObject.transform);
+        else
+#endif
+            visual = Object.Instantiate(prefab, tileObject.transform);
+
+        visual.transform.localPosition = Vector3.zero;
+        visual.transform.localRotation = Quaternion.identity;
+        visual.transform.localScale = Vector3.one;
+        visual.name = prefab.name;
+    }
+
+    if (!tiles.Contains(tile))
+        tiles.Add(tile);
+
+#if UNITY_EDITOR
+    if (!Application.isPlaying)
+        EditorUtility.SetDirty(this);
+#endif
+
+    return tile;
+}
+
+        // =========================================================
+        // ENVIRONMENT OBJECT
+        // =========================================================
+        public GameObject CreateEnvironmentObject(Vector3 worldPosition, GameObject prefab, EnvironmentCategory category)
+        {
+            if (!IsEnvironment || prefab == null) return null;
+
+            Transform parent = GetEnvironmentCategory(category) ?? transform;
+            GameObject obj;
+
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+                obj = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
             else
-            {
-                // Создаем GameObject для тайла-заглушки
-                tileObject = new GameObject($"Tile_{cellPosition.x}_{cellPosition.z}");
-                tileObject.transform.SetParent(transform, false);
-                tileObject.transform.localPosition = new Vector3(localPos.x, 0f, localPos.z);
+#endif
+                obj = Object.Instantiate(prefab, parent);
+
+            obj.transform.position = worldPosition;
 
 #if UNITY_EDITOR
-                if (!Application.isPlaying)
-                    UnityEditor.Undo.RegisterCreatedObjectUndo(tileObject, "Create Tile");
+            if (!Application.isPlaying)
+                EditorUtility.SetDirty(this);
 #endif
-            }
-
-            Tile tile = tileObject.GetComponent<Tile>();
-            if (tile == null)
-                tile = tileObject.AddComponent<Tile>();
-
-            tile.Initialize(cellPosition, tileType);
-
-            tiles.Add(tile);
-
-            return tile;
+            return obj;
         }
 
-        public Vector3Int WorldToCell(Vector3 worldPosition)
+        public GameObject CreateEnvironmentObject(Vector3 worldPosition, GameObject prefab, string category)
         {
-            if (grid == null) EnsureGrid();
+            if (!System.Enum.TryParse(category, true, out EnvironmentCategory parsed))
+                parsed = EnvironmentCategory.Props;
 
-            if (grid != null)
-            {
-                Vector3Int cellPos = grid.WorldToCell(worldPosition);
-                cellPos.y = 0;
-                return cellPos;
-            }
-            return Vector3Int.zero;
+            return CreateEnvironmentObject(worldPosition, prefab, parsed);
         }
 
-        public Vector3 GetCellCenterWorld(Vector3Int cellPosition)
+private Vector3 GetCellCenterLocal(Vector3Int cellPosition)
+{
+    EnsureGrid();
+    if (grid == null) return Vector3.zero;
+
+    Vector3 world = grid.GetCellCenterWorld(cellPosition);
+    world.y = transform.position.y;          // высота от Layer
+    return transform.InverseTransformPoint(world);
+}
+
+public Vector3 GetTileWorldPosition(Vector3Int cellPosition)
+{
+    EnsureGrid();
+    if (grid == null) return transform.position;
+
+    Vector3 world = grid.GetCellCenterWorld(cellPosition);
+    world.y = transform.position.y;
+    return world;
+}
+
+public Vector3 GetCellCenterWorld(Vector3Int cellPosition)
+{
+    EnsureGrid();
+    if (grid == null) return transform.position;
+
+    Vector3 world = grid.GetCellCenterWorld(cellPosition);
+    world.y = transform.position.y;
+    return world;
+}
+        // =========================================================
+        // OCCUPANCY
+        // =========================================================
+        public bool IsCellOccupiedInThisLayer(Vector3Int cellPosition)
         {
-            if (grid == null) EnsureGrid();
-
-            if (grid != null)
+            for (int i = 0; i < tiles.Count; i++)
             {
-                Vector3 worldPos = grid.GetCellCenterWorld(cellPosition);
-                return new Vector3(worldPos.x, 0f, worldPos.z);
+                Tile tile = tiles[i];
+                if (tile != null && tile.CellPosition == cellPosition)
+                    return true;
             }
-            return Vector3.zero;
+            return false;
         }
 
-        public Vector3 GetTileWorldPosition(Vector3Int cellPosition)
+        public bool IsCellOccupied(Vector3Int cellPosition)
         {
-            Vector3 localPos = GetCellCenterWorld(cellPosition);
-            Vector3 worldPos = transform.TransformPoint(localPos);
-            worldPos.y = transform.position.y;
-            return worldPos;
+            if (IsCellOccupiedInThisLayer(cellPosition))
+                return true;
+
+            EnsureGrid();
+            if (grid == null) return false;
+
+            Vector3 center = grid.GetCellCenterWorld(cellPosition);
+            Vector3 halfExtents = grid.cellSize * 0.45f;
+            Collider[] colliders = Physics.OverlapBox(center, halfExtents);
+
+            foreach (var collider in colliders)
+            {
+                if (collider != null && collider.GetComponentInParent<Tile>() != null)
+                    return true;
+            }
+            return false;
         }
 
-        public void ClearAllTiles()
+        // =========================================================
+        // TILE ACCESS
+        // =========================================================
+        public Tile GetTileAt(Vector3Int cellPosition)
         {
-            foreach (Tile tile in tiles)
+            for (int i = 0; i < tiles.Count; i++)
             {
-                if (tile != null)
-                {
-#if UNITY_EDITOR
-                    if (!Application.isPlaying)
-                        UnityEditor.Undo.DestroyObjectImmediate(tile.gameObject);
-                    else
-#endif
-                        Destroy(tile.gameObject);
-                }
+                Tile tile = tiles[i];
+                if (tile != null && tile.CellPosition == cellPosition)
+                    return tile;
             }
-            tiles.Clear();
-
-            foreach (DualDisplayTile displayTile in displayTiles)
-            {
-                if (displayTile != null)
-                    DestroyDisplayObject(displayTile.gameObject);
-            }
-            displayTiles.Clear();
+            return null;
         }
 
-        /// <summary>Destroys a logical tile's GameObject (its Undo-aware, matches CreateTile).</summary>
+        public List<Tile> GetTilesByType(string tileType)
+        {
+            var result = new List<Tile>();
+            foreach (var tile in tiles)
+            {
+                if (tile != null && tile.TileType == tileType)
+                    result.Add(tile);
+            }
+            return result;
+        }
+
+        public bool HasTileOfType(Vector3Int cellPosition, string tileType)
+        {
+            Tile tile = GetTileAt(cellPosition);
+            return tile != null && tile.TileType == tileType;
+        }
+
+        public Tile GetTileOfType(Vector3Int cellPosition, string tileType)
+        {
+            Tile tile = GetTileAt(cellPosition);
+            return tile != null && tile.TileType == tileType ? tile : null;
+        }
+
+        // =========================================================
+        // DESTROY / CLEAR
+        // =========================================================
         public void DestroyTile(Tile tile)
         {
             if (tile == null) return;
+            tiles.Remove(tile);
 
 #if UNITY_EDITOR
             if (!Application.isPlaying)
                 Undo.DestroyObjectImmediate(tile.gameObject);
             else
-                Destroy(tile.gameObject);
-#else
-            Destroy(tile.gameObject);
 #endif
+                Destroy(tile.gameObject);
         }
 
-        // НОВЫЙ МЕТОД - проверяет только в этом слое
-        public bool IsCellOccupiedInThisLayer(Vector3Int cellPosition)
+        public void ClearAllTiles()
         {
-            if (grid == null) EnsureGrid();
-            if (grid == null) return false;
+            CleanupLists();
 
-            // Проверяем по списку тайлов в этом слое
-            foreach (Tile tile in tiles)
+            for (int i = tiles.Count - 1; i >= 0; i--)
             {
-                if (tile != null)
+                Tile tile = tiles[i];
+                if (tile == null) continue;
+
+#if UNITY_EDITOR
+                if (!Application.isPlaying)
+                    Undo.DestroyObjectImmediate(tile.gameObject);
+                else
+#endif
+                    Destroy(tile.gameObject);
+            }
+            tiles.Clear();
+
+            for (int i = displayTiles.Count - 1; i >= 0; i--)
+            {
+                DualDisplayTile display = displayTiles[i];
+                if (display == null) continue;
+
+#if UNITY_EDITOR
+                if (!Application.isPlaying)
+                    Undo.DestroyObjectImmediate(display.gameObject);
+                else
+#endif
+                    Destroy(display.gameObject);
+            }
+            displayTiles.Clear();
+        }
+
+        private void CleanupLists()
+        {
+            tiles.RemoveAll(x => x == null);
+            displayTiles.RemoveAll(x => x == null);
+        }
+
+private Vector3 GetDualDisplayLocalPosition(Vector3Int displayCellPosition)
+{
+    EnsureGrid();
+    if (grid == null) return Vector3.zero;
+
+    // Центр dual-клетки
+    Vector3 world = grid.CellToWorld(displayCellPosition);
+    
+    // Смещение на половину клетки (dual-grid)
+    Vector3 offset = new Vector3(
+        grid.cellSize.x * 1f,
+        0f,
+        grid.cellSize.z * 1f
+    );
+    
+    world += offset;
+    
+    // ===== ГЛАВНОЕ: высота от Layer, а не от Grid =====
+    world.y = transform.position.y;
+    // ==================================================
+    
+    return transform.InverseTransformPoint(world);
+}
+
+        public void RefreshDualDisplayCell(Vector3Int displayCellPosition, TileBiomeData biome, string tileType)
+        {
+            if (biome == null) return;
+
+            Tile topLeft = GetTileOfType(displayCellPosition + new Vector3Int(0, 0, 1), tileType);
+            Tile topRight = GetTileOfType(displayCellPosition + new Vector3Int(1, 0, 1), tileType);
+            Tile bottomLeft = GetTileOfType(displayCellPosition, tileType);
+            Tile bottomRight = GetTileOfType(displayCellPosition + new Vector3Int(1, 0, 0), tileType);
+
+            RemoveDisplayTilesAt(displayCellPosition);
+
+            // Liquid diagonals
+            if (tileType == "Liquid")
+            {
+                bool diagonalA = topLeft != null && bottomRight != null && topRight == null && bottomLeft == null;
+                bool diagonalB = topRight != null && bottomLeft != null && topLeft == null && bottomRight == null;
+
+                if (diagonalA)
                 {
-                    if (tile.CellPosition.x == cellPosition.x && tile.CellPosition.z == cellPosition.z)
-                    {
-                        return true;
-                    }
+                    CreateLiquidCorner(displayCellPosition, biome, 1);
+                    CreateLiquidCorner(displayCellPosition, biome, 3);
+                    return;
+                }
+                if (diagonalB)
+                {
+                    CreateLiquidCorner(displayCellPosition, biome, 2);
+                    CreateLiquidCorner(displayCellPosition, biome, 0);
+                    return;
                 }
             }
 
-            return false;
-        }
-
-        // СТАРЫЙ МЕТОД - проверяет все слои (для совместимости)
-        public bool IsCellOccupied(Vector3Int cellPosition)
-        {
-            if (grid == null) EnsureGrid();
-            if (grid == null) return false;
-
-            // Проверяем по списку тайлов в этом слое
-            foreach (Tile tile in tiles)
-            {
-                if (tile != null)
-                {
-                    if (tile.CellPosition.x == cellPosition.x && tile.CellPosition.z == cellPosition.z)
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            // Дополнительная проверка через физику (только тайлы в этом слое)
-            Vector3 worldPos = GetTileWorldPosition(cellPosition);
-            Vector3 halfExt = grid.cellSize * 0.4f;
-            Collider[] colliders = Physics.OverlapBox(worldPos, halfExt);
-
-            foreach (Collider collider in colliders)
-            {
-                if (collider.gameObject != null && !collider.isTrigger)
-                {
-                    Tile tile = collider.GetComponent<Tile>();
-                    if (tile != null && tile.CellPosition.x == cellPosition.x && tile.CellPosition.z == cellPosition.z)
-                    {
-                        // Проверяем что тайл принадлежит этому слою
-                        if (tile.transform.parent == transform)
-                        {
-                            if (!tiles.Contains(tile))
-                            {
-                                tiles.Add(tile);
-                            }
-                            return true;
-                        }
-                    }
-                }
-            }
-
-            return false;
-        }
-
-        public Tile GetTileAt(Vector3Int cellPosition)
-        {
-            return tiles.Find(t => t.CellPosition.x == cellPosition.x && t.CellPosition.z == cellPosition.z);
-        }
-
-        // ============ DUAL GRID AUTO TILE ============
-        //
-        // The VISUAL grid is offset by 1 cell from this LOGICAL (painted)
-        // grid: a display tile at index D is centred exactly on the corner
-        // shared by the 4 logical cells D, D-West, D-South, D-West-South (=
-        // grid.CellToWorld(D), the cell's own min/SW corner). That means a
-        // display tile never needs an offset or a stack of extra pieces to
-        // close a border - the mesh IS the border, based on which of its 4
-        // sampled logical cells are filled. See DualGridAutoTile.
-
-        private static readonly Vector3Int[] DualDisplayOffsets =
-        {
-            new Vector3Int(0, 0, 0),
-            new Vector3Int(1, 0, 0),
-            new Vector3Int(0, 0, 1),
-            new Vector3Int(1, 0, 1),
-        };
-
-        /// <summary>True if this layer has a painted logical tile of the given type at cellPosition.</summary>
-        public bool HasTileOfType(Vector3Int cellPosition, string tileType)
-        {
-            return GetTileOfType(cellPosition, tileType) != null;
-        }
-
-        /// <summary>Returns the painted logical tile of the given type at cellPosition, or null.</summary>
-        public Tile GetTileOfType(Vector3Int cellPosition, string tileType)
-        {
-            return tiles.Find(t => t != null && t.TileType == tileType && t.CellPosition.x == cellPosition.x && t.CellPosition.z == cellPosition.z);
-        }
-
-        private DualDisplayTile FindDisplayTile(Vector3Int displayCellPosition, string tileType)
-        {
-            return displayTiles.Find(d => d != null && d.TileType == tileType && d.CellPosition.x == displayCellPosition.x && d.CellPosition.z == displayCellPosition.z);
-        }
-
-        /// <summary>
-        /// World-space (X/Z only) position of the corner shared by the 4
-        /// logical cells a display tile at displayCellPosition straddles.
-        /// </summary>
-        public Vector3 GetDualDisplayLocalPosition(Vector3Int displayCellPosition)
-        {
-            if (grid == null) EnsureGrid();
-            if (grid == null) return Vector3.zero;
-
-            Vector3 corner = grid.CellToWorld(displayCellPosition);
-            return new Vector3(corner.x, 0f, corner.z);
-        }
-
-        /// <summary>
-        /// Recomputes and applies the correct dual-grid visual (shape +
-        /// rotation, or none at all) for a single display cell of the given
-        /// tile type, using biome to pick the prefab.
-        /// </summary>
-        public void RefreshDualDisplayCell(Vector3Int displayCellPosition, string tileType, TileBiomeData biome)
-        {
-            Vector3Int topLeftPos = displayCellPosition + new Vector3Int(-1, 0, 0);
-            Vector3Int topRightPos = displayCellPosition;
-            Vector3Int botLeftPos = displayCellPosition + new Vector3Int(-1, 0, -1);
-            Vector3Int botRightPos = displayCellPosition + new Vector3Int(0, 0, -1);
-
-            Tile topLeftTile = GetTileOfType(topLeftPos, tileType);
-            Tile topRightTile = GetTileOfType(topRightPos, tileType);
-            Tile botLeftTile = GetTileOfType(botLeftPos, tileType);
-            Tile botRightTile = GetTileOfType(botRightPos, tileType);
-
-            bool topLeft = topLeftTile != null;
-            bool topRight = topRightTile != null;
-            bool botLeft = botLeftTile != null;
-            bool botRight = botRightTile != null;
-
-            GameObject prefab = null;
-            int rotationSteps = 0;
-
-            if (biome != null && DualGridAutoTile.TryGetShape(topLeft, topRight, botLeft, botRight, out DualTileShape shape, out rotationSteps))
-            {
-                // Комбинируем variant seed всех участвующих (заполненных)
-                // логических тайлов - переключение варианта у любого из них
-                // (Tile.CycleVariant, по клику) меняет итоговый префаб этой
-                // display-клетки.
-                int variantSeed = 0;
-                if (topLeftTile != null) variantSeed += topLeftTile.VariantSeed;
-                if (topRightTile != null) variantSeed += topRightTile.VariantSeed;
-                if (botLeftTile != null) variantSeed += botLeftTile.VariantSeed;
-                if (botRightTile != null) variantSeed += botRightTile.VariantSeed;
-
-                biome.TryGetDualTilePrefab(tileType, shape, variantSeed, out prefab);
-            }
-
-            DualDisplayTile existing = FindDisplayTile(displayCellPosition, tileType);
-            if (existing != null)
-            {
-                displayTiles.Remove(existing);
-                DestroyDisplayObject(existing.gameObject);
-            }
-
-            if (prefab == null)
+            // Autotile
+            if (!DualGridAutoTile.TryGetShape(
+                    topLeft != null, topRight != null,
+                    bottomLeft != null, bottomRight != null,
+                    out DualTileShape shape, out int rotationSteps))
                 return;
 
-            if (grid == null) EnsureGrid();
-            if (grid == null) return;
+            int variantSeed = 0;
+            if (topLeft != null) variantSeed += topLeft.VariantSeed;
+            if (topRight != null) variantSeed += topRight.VariantSeed;
+            if (bottomLeft != null) variantSeed += bottomLeft.VariantSeed;
+            if (bottomRight != null) variantSeed += bottomRight.VariantSeed;
 
-            Vector3 localPos = transform.InverseTransformPoint(GetDualDisplayLocalPosition(displayCellPosition));
+            if (!biome.TryGetDualTilePrefab(tileType, shape, variantSeed, out GameObject prefab))
+                return;
+
+            CreateDisplayObject(displayCellPosition, prefab, rotationSteps, shape, tileType);
+        }
+
+        private void CreateLiquidCorner(Vector3Int displayCellPosition, TileBiomeData biome, int rotationSteps)
+        {
+            if (!biome.TryGetDualTilePrefab("Liquid", DualTileShape.Corner, rotationSteps, out GameObject prefab))
+                return;
+
+            CreateDisplayObject(displayCellPosition, prefab, rotationSteps, DualTileShape.Corner, "Liquid");
+        }
+
+        private DualDisplayTile CreateDisplayObject(
+            Vector3Int displayCellPosition,
+            GameObject prefab,
+            int rotationSteps,
+            DualTileShape shape,
+            string tileType)
+        {
+            if (prefab == null) return null;
 
             GameObject obj;
 #if UNITY_EDITOR
-            obj = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-            if (obj == null)
-                obj = Object.Instantiate(prefab);
-            Undo.RegisterCreatedObjectUndo(obj, "Auto Tile Display");
-#else
-            obj = Object.Instantiate(prefab);
+            if (!Application.isPlaying)
+                obj = (GameObject)PrefabUtility.InstantiatePrefab(prefab, transform);
+            else
 #endif
-            obj.transform.SetParent(transform, false);
-            obj.transform.localPosition = new Vector3(localPos.x, 0f, localPos.z);
+                obj = Object.Instantiate(prefab, transform);
+
+            obj.transform.localPosition = GetDualDisplayLocalPosition(displayCellPosition);
             obj.transform.localRotation = Quaternion.Euler(0f, rotationSteps * 90f, 0f);
-            obj.name = $"Display_{tileType}_{displayCellPosition.x}_{displayCellPosition.z}";
 
-            DualDisplayTile displayTile = obj.GetComponent<DualDisplayTile>();
-            if (displayTile == null)
-                displayTile = obj.AddComponent<DualDisplayTile>();
-            displayTile.Initialize(displayCellPosition, tileType);
-            displayTiles.Add(displayTile);
-        }
+            DualDisplayTile display = obj.GetComponent<DualDisplayTile>() ?? obj.AddComponent<DualDisplayTile>();
+            display.Initialize(displayCellPosition, tileType);
+            displayTiles.Add(display);
 
-        private static void DestroyDisplayObject(GameObject obj)
-        {
-            if (obj == null) return;
 #if UNITY_EDITOR
             if (!Application.isPlaying)
-                Undo.DestroyObjectImmediate(obj);
-            else
-                Destroy(obj);
-#else
-            Destroy(obj);
+                EditorUtility.SetDirty(this);
 #endif
+            return display;
         }
 
-        /// <summary>
-        /// Refreshes all 4 dual-grid display cells that sample the given
-        /// logical cell - call this right after painting or erasing a
-        /// logical tile so its visual border updates on both sides of the
-        /// change.
-        /// </summary>
-        public void RefreshDualDisplayAround(Vector3Int logicalCellPosition, string tileType, TileBiomeData biome)
+        private void RemoveDisplayTilesAt(Vector3Int displayCellPosition)
         {
-            foreach (Vector3Int offset in DualDisplayOffsets)
-                RefreshDualDisplayCell(logicalCellPosition + offset, tileType, biome);
+            for (int i = displayTiles.Count - 1; i >= 0; i--)
+            {
+                DualDisplayTile display = displayTiles[i];
+                if (display == null)
+                {
+                    displayTiles.RemoveAt(i);
+                    continue;
+                }
+
+                if (display.CellPosition != displayCellPosition) continue;
+
+                displayTiles.RemoveAt(i);
+
+#if UNITY_EDITOR
+                if (!Application.isPlaying)
+                    Undo.DestroyObjectImmediate(display.gameObject);
+                else
+#endif
+                    Destroy(display.gameObject);
+            }
         }
 
-        public List<Tile> GetTilesByType(string tileType)
+        public void RefreshDualDisplayAround(Vector3Int cellPosition, TileBiomeData biome, string tileType)
         {
-            return tiles.FindAll(t => t.TileType == tileType);
+            for (int x = -1; x <= 1; x++)
+                for (int z = -1; z <= 1; z++)
+                    RefreshDualDisplayCell(cellPosition + new Vector3Int(x, 0, z), biome, tileType);
         }
 
-        public Vector3 GetLayerPosition()
-        {
-            return transform.position;
-        }
-
-        public void SetLayerPosition(Vector3 position)
-        {
-            transform.position = position;
-        }
+        // =========================================================
+        // TRANSFORM
+        // =========================================================
+        public Vector3 GetLayerPosition() => transform.position;
+        public void SetLayerPosition(Vector3 position) => transform.position = position;
     }
 }
