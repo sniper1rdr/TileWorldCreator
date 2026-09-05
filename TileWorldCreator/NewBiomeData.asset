@@ -15,28 +15,34 @@ MonoBehaviour:
   biomeId: NewBiomeData
   displayName: NewBiomeData
   groundTiles:
-    flat:
-    - {fileID: 840994664455156962, guid: ce9ac7ce66a13614ba202cc0cfde567c, type: 3}
-    straightEdge:
-    - {fileID: 5561383863970188866, guid: 1afee66dfb2cd424083eff4afa62a232, type: 3}
-    outerCorner:
+    corner:
     - {fileID: 124228837714961886, guid: 3bd14f4981f97fd45b42248affc45a3a, type: 3}
-    innerCorner:
+    - {fileID: 2221135471954083421, guid: e0b13c8d1a92660468e9796303f6041a, type: 3}
+    edge:
+    - {fileID: 7878245258564455228, guid: 7e4234c608e1ab341a66a8ddd0153f09, type: 3}
+    - {fileID: 5561383863970188866, guid: 1afee66dfb2cd424083eff4afa62a232, type: 3}
+    threeSided:
     - {fileID: 7063898371958948400, guid: a0b41bb13e6a8344aa81d0644193ff0a, type: 3}
-  liquidTiles:
+    - {fileID: 755746787703254227, guid: 04b06afd66f1fc34f86d395bf409a9f6, type: 3}
+    diagonal:
+    - {fileID: 2877758577596218010, guid: c36ef4a334f513341b88a50d5706c43b, type: 3}
+    - {fileID: 650340512938318339, guid: d534cbf15c91c2f4ba34dc37b7f6dfce, type: 3}
     flat:
     - {fileID: 840994664455156962, guid: ce9ac7ce66a13614ba202cc0cfde567c, type: 3}
-    straightEdge:
-    - {fileID: 7878245258564455228, guid: 7e4234c608e1ab341a66a8ddd0153f09, type: 3}
-    outerCorner:
-    - {fileID: 525140772934673804, guid: 3bd14f4981f97fd45b42248affc45a3a, type: 3}
-    innerCorner:
-    - {fileID: 981724454764668081, guid: a0b41bb13e6a8344aa81d0644193ff0a, type: 3}
+  liquidTiles:
+    corner: []
+    edge: []
+    threeSided: []
+    diagonal: []
+    flat:
+    - {fileID: 840994664455156962, guid: ce9ac7ce66a13614ba202cc0cfde567c, type: 3}
   decorativeTiles:
-    flat: []
-    straightEdge: []
-    outerCorner: []
-    innerCorner: []
+    corner: []
+    edge: []
+    threeSided: []
+    diagonal: []
+    flat:
+    - {fileID: 840994664455156962, guid: ce9ac7ce66a13614ba202cc0cfde567c, type: 3}
   rocks:
   - {fileID: 8261502779630752912, guid: 98f14f2b607fa4b4a80ab4b868808b71, type: 3}
   trees:
