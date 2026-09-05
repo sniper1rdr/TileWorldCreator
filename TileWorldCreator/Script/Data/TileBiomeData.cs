@@ -38,7 +38,7 @@ namespace TileWorldCreator
         public Vector2 randomScaleRange = new Vector2(0.8f, 1.2f);
 
         public static class Categories
-n        {
+        {
             public const string Rocks = "Rocks";
             public const string Trees = "Trees";
             public const string Vegetation = "Vegetation";
