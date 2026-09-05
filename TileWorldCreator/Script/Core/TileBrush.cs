@@ -291,11 +291,10 @@ namespace TileWorldCreator
             string tileType = tile.TileType;
 
             targetLayer.Tiles.Remove(tile);
-            // Уничтожает и сам тайл, и все его доп. куски (углы/края), если они были.
-            targetLayer.DestroyTileVisual(tile);
+            targetLayer.DestroyTile(tile);
 
-            // Соседи вокруг дыры могли потерять соединение - пересчитываем их форму/поворот
-            RefreshAutoTileNeighbors(cellPosition, tileType);
+            // Дырка могла изменить внешность окружающих display-клеток дуальной сетки.
+            targetLayer.RefreshDualDisplayAround(cellPosition, tileType, currentBiome);
         }
 
         private void EraseEnvironmentObject(Vector3Int cellPosition)
@@ -349,96 +348,26 @@ namespace TileWorldCreator
         private void PaintLevelTile(Vector3Int cellPosition)
         {
             if (targetLayer == null) return;
-            
+
             // ИСПРАВЛЕНО: Используем новый метод проверки ТОЛЬКО в этом слое
             if (!targetLayer.IsCellOccupiedInThisLayer(cellPosition))
             {
-                System.Collections.Generic.List<(GameObject prefab, float rotationY, Vector2 localOffset)> pieces = null;
-
-                if (currentBiome != null)
+                // Логический тайл - это просто маркер занятости клетки, без
+                // собственного меша: вся видимая геометрия строится отдельно
+                // на дуальной (смещённой на пол-клетки) сетке display-тайлов.
+                Tile t = targetLayer.CreateTile(cellPosition, currentTileType);
+                if (t != null)
                 {
-                    // Считаем маски соседей ДО постановки тайла - ячейка ещё не занята текущим тайлом
-                    TileSide orthoMask = targetLayer.GetNeighborMask(cellPosition, currentTileType);
-                    TileCorner cornerMask = targetLayer.GetCornerMask(cellPosition, currentTileType);
-                    pieces = currentBiome.GetAutoTilePieces(currentTileType, orthoMask, cornerMask, targetLayer.CellSizeXZ);
-                }
-
-                if (pieces != null && pieces.Count > 0)
-                {
-#if UNITY_EDITOR
-                    GameObject newTile = PrefabUtility.InstantiatePrefab(pieces[0].prefab) as GameObject;
-                    if (newTile == null)
-                        newTile = Object.Instantiate(pieces[0].prefab);
-                    Undo.RegisterCreatedObjectUndo(newTile, "Place Tile");
-#else
-                    GameObject newTile = Object.Instantiate(pieces[0].prefab);
-#endif
-
-                    newTile.transform.SetParent(targetLayer.transform, false);
-                    // Выставляем позицию точно в клетке (+ смещение накладки, если есть)
-                    Vector3 localPos = targetLayer.GetTileWorldPosition(cellPosition);
-                    localPos.x += pieces[0].localOffset.x;
-                    localPos.z += pieces[0].localOffset.y;
-                    // Convert to local
-                    Vector3 local = targetLayer.transform.InverseTransformPoint(localPos);
-                    newTile.transform.localPosition = local;
-                    newTile.transform.localRotation = Quaternion.Euler(0f, pieces[0].rotationY, 0f);
-                    newTile.name = $"Tile_{cellPosition.x}_{cellPosition.z}";
-
-                    Tile tileComponent = newTile.GetComponent<Tile>();
-                    if (tileComponent == null)
-                        tileComponent = newTile.AddComponent<Tile>();
-                    tileComponent.Initialize(cellPosition, currentTileType);
-
-                    // Доп. куски (углы/края), нужные для одиночных/частично соединённых
-                    // тайлов, чтобы у них никогда не оставалось незакрытых открытых сторон.
-                    for (int i = 1; i < pieces.Count; i++)
-                    {
-                        GameObject extra = targetLayer.CreatePiecePrefabInstance(cellPosition, pieces[i].prefab, pieces[i].rotationY, pieces[i].localOffset, $"Tile_{cellPosition.x}_{cellPosition.z}_extra{i}");
-                        if (extra != null)
-                            tileComponent.ExtraPieces.Add(extra);
-                    }
-
-                    if (!targetLayer.Tiles.Contains(tileComponent))
-                    {
-                        targetLayer.Tiles.Add(tileComponent);
-                    }
-
-                    RefreshAutoTileNeighbors(cellPosition, currentTileType);
-                }
-                else
-                {
-                    // Если нет префаба - создаём простую заглушку
-                    Tile t = targetLayer.CreateTile(cellPosition, "Default");
-                    if (t != null && !targetLayer.Tiles.Contains(t))
+                    if (!targetLayer.Tiles.Contains(t))
                         targetLayer.Tiles.Add(t);
+
+                    // Пересчитываем 4 display-клетки дуальной сетки, которые
+                    // затрагивает эта логическая клетка.
+                    targetLayer.RefreshDualDisplayAround(cellPosition, currentTileType, currentBiome);
                 }
             }
         }
         
-        /// <summary>
-        /// After placing a tile, re-evaluates the auto tile shape/rotation of
-        /// all 8 same-type neighbours (orthogonal + diagonal) - they may now
-        /// need to switch shape (e.g. Flat -> InnerCorner) or rotation.
-        /// </summary>
-        private void RefreshAutoTileNeighbors(Vector3Int cellPosition, string tileType)
-        {
-            if (targetLayer == null || currentBiome == null) return;
-
-            foreach (Vector3Int neighborCell in targetLayer.GetAllNeighborCells(cellPosition))
-            {
-                Tile neighborTile = targetLayer.GetTileAt(neighborCell);
-                if (neighborTile == null || neighborTile.TileType != tileType) continue;
-
-                TileSide orthoMask = targetLayer.GetNeighborMask(neighborCell, tileType);
-                TileCorner cornerMask = targetLayer.GetCornerMask(neighborCell, tileType);
-                var pieces = currentBiome.GetAutoTilePieces(tileType, orthoMask, cornerMask, targetLayer.CellSizeXZ);
-                if (pieces == null || pieces.Count == 0) continue;
-
-                targetLayer.ApplyAutoTileVisual(neighborTile, pieces);
-            }
-        }
-
         private void PaintEnvironment(Vector3Int cellPosition)
         {
             if (targetLayer == null) return;
@@ -551,17 +480,20 @@ namespace TileWorldCreator
         {
             float baseY = targetLayer.transform.position.y + 0.01f;
 
-            GameObject occupant = null;
             if (paintMode == "Level")
             {
+                // В Level-режиме логический Tile - это пустой маркер без меша
+                // (вся геометрия рисуется отдельно на смещённой dual-grid
+                // сетке), поэтому высоту берём из настроек биома, а не из
+                // Renderer.bounds.
                 Tile tile = targetLayer.GetTileAt(cellPosition);
-                if (tile != null) occupant = tile.gameObject;
-            }
-            else
-            {
-                occupant = FindEnvironmentObjectAtCell(cellPosition);
+                if (tile == null) return baseY;
+
+                float height = currentBiome != null ? currentBiome.tileHeight : 1f;
+                return baseY + height + 0.02f;
             }
 
+            GameObject occupant = FindEnvironmentObjectAtCell(cellPosition);
             if (occupant == null) return baseY;
 
             Renderer[] renderers = occupant.GetComponentsInChildren<Renderer>();

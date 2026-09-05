@@ -3,32 +3,36 @@ using UnityEngine;
 namespace TileWorldCreator
 {
     /// <summary>
-    /// One prefab pool per auto tile shape for a single tile type (Ground /
-    /// Liquid / Decorative). All prefabs in a pool must be authored at 0
-    /// degrees Y rotation matching the shape's canonical mask (see
-    /// AutoTileMask) - the brush only ever rotates them in 90 degree
-    /// clockwise steps, it never mirrors/flips them.
+    /// One prefab pool per dual-grid display shape for a single tile type
+    /// (Ground / Liquid / Decorative). All prefabs in a pool must be authored
+    /// at 0 degree Y rotation matching the shape's canonical mask (see
+    /// DualGridAutoTile) - the brush only ever rotates them in 90 degree
+    /// steps, it never mirrors/flips them.
     /// </summary>
     [System.Serializable]
     public class TerrainAutoTileSet
     {
-        [Tooltip("Ровная земля: базовый тайл на всю клетку, ставится всегда независимо от соседей.")]
+        [Tooltip("Угол: ровно 1 из 4 соседних клеток того же типа заполнена (выпуклый угол, торчащий в пустоту).")]
+        public GameObject[] corner;
+
+        [Tooltip("Край: 2 СОСЕДНИЕ из 4 клеток заполнены - прямая граница.")]
+        public GameObject[] edge;
+
+        [Tooltip("Три стороны: 3 из 4 клеток заполнены - прямая граница с вогнутой выемкой.")]
+        public GameObject[] threeSided;
+
+        [Tooltip("Диагональ: 2 ПРОТИВОПОЛОЖНЫЕ из 4 клеток заполнены - неоднозначный \"седловой\" случай.")]
+        public GameObject[] diagonal;
+
+        [Tooltip("Ровная земля: все 4 клетки заполнены - тайл полностью окружён, границы нет.")]
         public GameObject[] flat;
 
-        [Tooltip("Прямой край: маленькая накладка вдоль одной стороны клетки, ставится когда с этой стороны нет соседа того же типа (по умолчанию граница на West, соединения North+East+South).")]
-        public GameObject[] straightEdge;
-
-        [Tooltip("Внешний угол: маленькая накладка на четверть клетки в один угол, ставится когда обе смежные стороны этого угла открыты (по умолчанию North+East соединены, граница South+West).")]
-        public GameObject[] outerCorner;
-
-        [Tooltip("Внутренний угол: маленькая накладка на четверть клетки в один угол, ставится когда обе смежные стороны соединены, но диагональный сосед в этом углу отсутствует (по умолчанию вырез на NE).")]
-        public GameObject[] innerCorner;
-
         public bool IsValid =>
-            (flat != null && flat.Length > 0) ||
-            (straightEdge != null && straightEdge.Length > 0) ||
-            (outerCorner != null && outerCorner.Length > 0) ||
-            (innerCorner != null && innerCorner.Length > 0);
+            (corner != null && corner.Length > 0) ||
+            (edge != null && edge.Length > 0) ||
+            (threeSided != null && threeSided.Length > 0) ||
+            (diagonal != null && diagonal.Length > 0) ||
+            (flat != null && flat.Length > 0);
     }
 
     [CreateAssetMenu(menuName = "TileWorld/Biome Data", fileName = "TileBiomeData")]
@@ -68,14 +72,6 @@ namespace TileWorldCreator
         public float tileHeight = 1f;
         public bool randomRotation = true;
         public Vector2 randomScaleRange = new Vector2(0.8f, 1.2f);
-
-        [Header("Auto Tile Overlay Placement")]
-        [Tooltip("Насколько сильно (в долях размера клетки) сдвигать накладку Straight Edge к своей стороне клетки.")]
-        [Range(0f, 1f)]
-        public float edgeOverlayOffset = 0.5f;
-        [Tooltip("Насколько сильно (в долях размера клетки, по обеим осям) сдвигать накладку Outer/Inner Corner к своему углу клетки.")]
-        [Range(0f, 1f)]
-        public float cornerOverlayOffset = 0.25f;
 
         public bool IsValid =>
             !string.IsNullOrWhiteSpace(biomeId) &&
@@ -130,65 +126,42 @@ namespace TileWorldCreator
         }
 
         /// <summary>
-        /// Picks the tile prefab(s) for the given neighbour masks, based on
-        /// this biome's auto tile pools. Always includes a Flat base piece
-        /// (offset zero, covers the whole cell) plus a small Straight Edge /
-        /// Outer Corner / Inner Corner overlay piece for every side/corner
-        /// that needs one, each with its own Y rotation (degrees) and local
-        /// XZ offset (in world units, already scaled by the cell size and the
-        /// edgeOverlayOffset/cornerOverlayOffset settings above) so the
-        /// overlay sits along the correct side or in the correct corner of
-        /// the cell instead of the cell centre. orthoMask/cornerMask should
-        /// come from Layer.GetNeighborMask / Layer.GetCornerMask for the cell
-        /// being painted.
+        /// Picks a single prefab for the given dual-grid display shape, based
+        /// on this biome's auto tile pools for tileType. Returns false (and a
+        /// null prefab) if no prefab is authored for that role, so the
+        /// display cell should stay empty rather than fake it with a
+        /// different role. shape/rotation come from DualGridAutoTile.TryGetShape.
         /// </summary>
-        public System.Collections.Generic.List<(GameObject prefab, float rotationY, Vector2 localOffset)> GetAutoTilePieces(string tileType, TileSide orthoMask, TileCorner cornerMask, Vector2 cellSize)
+        public bool TryGetDualTilePrefab(string tileType, DualTileShape shape, out GameObject prefab)
         {
-            var result = new System.Collections.Generic.List<(GameObject prefab, float rotationY, Vector2 localOffset)>();
+            prefab = null;
 
             TerrainAutoTileSet tileSet = GetTileSet(tileType);
             if (tileSet == null)
-                return result;
+                return false;
 
-            foreach (AutoTilePiece piece in AutoTileMask.BuildPieces(orthoMask, cornerMask))
-            {
-                GameObject[] pool = GetRolePool(tileSet, piece.shape);
-                if (pool == null || pool.Length == 0)
-                    continue; // no prefab authored for this role - skip this overlay, don't fake it with another role
+            GameObject[] pool = GetRolePool(tileSet, shape);
+            if (pool == null || pool.Length == 0)
+                return false;
 
-                Vector2 localOffset;
-                switch (piece.kind)
-                {
-                    case AutoTilePieceKind.Edge:
-                        localOffset = Vector2.Scale(AutoTileMask.SideDirection(piece.edgeSide) * edgeOverlayOffset, cellSize);
-                        break;
-                    case AutoTilePieceKind.Corner:
-                        localOffset = Vector2.Scale(AutoTileMask.CornerDirection(piece.cornerDir) * cornerOverlayOffset, cellSize);
-                        break;
-                    default:
-                        localOffset = Vector2.zero;
-                        break;
-                }
-
-                GameObject prefab = pool[Random.Range(0, pool.Length)];
-                result.Add((prefab, piece.rotationSteps * 90f, localOffset));
-            }
-
-            return result;
+            prefab = pool[Random.Range(0, pool.Length)];
+            return prefab != null;
         }
 
-        private static GameObject[] GetRolePool(TerrainAutoTileSet tileSet, AutoTileShape shape)
+        private static GameObject[] GetRolePool(TerrainAutoTileSet tileSet, DualTileShape shape)
         {
             switch (shape)
             {
-                case AutoTileShape.Flat:
+                case DualTileShape.Corner:
+                    return tileSet.corner;
+                case DualTileShape.Edge:
+                    return tileSet.edge;
+                case DualTileShape.ThreeSided:
+                    return tileSet.threeSided;
+                case DualTileShape.Diagonal:
+                    return tileSet.diagonal;
+                case DualTileShape.Flat:
                     return tileSet.flat;
-                case AutoTileShape.StraightEdge:
-                    return tileSet.straightEdge;
-                case AutoTileShape.OuterCorner:
-                    return tileSet.outerCorner;
-                case AutoTileShape.InnerCorner:
-                    return tileSet.innerCorner;
                 default:
                     return null;
             }

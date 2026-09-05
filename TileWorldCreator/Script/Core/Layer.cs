@@ -14,23 +14,11 @@ namespace TileWorldCreator
         [SerializeField] private string layerName = "Ground_01";
         [SerializeField] private Grid grid;
         [SerializeField] private List<Tile> tiles = new List<Tile>();
+        [SerializeField] private List<DualDisplayTile> displayTiles = new List<DualDisplayTile>();
 
         public string LayerName => layerName;
         public Grid Grid => grid;
         public List<Tile> Tiles => tiles;
-
-        /// <summary>
-        /// Cell size on the ground plane (X/Z), used to convert auto tile
-        /// overlay offset fractions (0..1 of a cell) into world units.
-        /// </summary>
-        public Vector2 CellSizeXZ
-        {
-            get
-            {
-                if (grid == null) EnsureGrid();
-                return grid != null ? new Vector2(grid.cellSize.x, grid.cellSize.z) : Vector2.one;
-            }
-        }
 
         public void Initialize(string name)
         {
@@ -181,17 +169,6 @@ namespace TileWorldCreator
             {
                 if (tile != null)
                 {
-                    foreach (GameObject piece in tile.ExtraPieces)
-                    {
-                        if (piece == null) continue;
-#if UNITY_EDITOR
-                        if (!Application.isPlaying)
-                            UnityEditor.Undo.DestroyObjectImmediate(piece);
-                        else
-#endif
-                            Destroy(piece);
-                    }
-
 #if UNITY_EDITOR
                     if (!Application.isPlaying)
                         UnityEditor.Undo.DestroyObjectImmediate(tile.gameObject);
@@ -201,6 +178,28 @@ namespace TileWorldCreator
                 }
             }
             tiles.Clear();
+
+            foreach (DualDisplayTile displayTile in displayTiles)
+            {
+                if (displayTile != null)
+                    DestroyDisplayObject(displayTile.gameObject);
+            }
+            displayTiles.Clear();
+        }
+
+        /// <summary>Destroys a logical tile's GameObject (its Undo-aware, matches CreateTile).</summary>
+        public void DestroyTile(Tile tile)
+        {
+            if (tile == null) return;
+
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+                Undo.DestroyObjectImmediate(tile.gameObject);
+            else
+                Destroy(tile.gameObject);
+#else
+            Destroy(tile.gameObject);
+#endif
         }
 
         // НОВЫЙ МЕТОД - проверяет только в этом слое
@@ -275,218 +274,125 @@ namespace TileWorldCreator
             return tiles.Find(t => t.CellPosition.x == cellPosition.x && t.CellPosition.z == cellPosition.z);
         }
 
-        // ============ AUTO TILE ============
+        // ============ DUAL GRID AUTO TILE ============
+        //
+        // The VISUAL grid is offset by 1 cell from this LOGICAL (painted)
+        // grid: a display tile at index D is centred exactly on the corner
+        // shared by the 4 logical cells D, D-West, D-South, D-West-South (=
+        // grid.CellToWorld(D), the cell's own min/SW corner). That means a
+        // display tile never needs an offset or a stack of extra pieces to
+        // close a border - the mesh IS the border, based on which of its 4
+        // sampled logical cells are filled. See DualGridAutoTile.
 
-        private static readonly Vector3Int[] OrthogonalOffsets =
+        private static readonly Vector3Int[] DualDisplayOffsets =
         {
-            new Vector3Int(0, 0, 1),  // North (+Z)
-            new Vector3Int(1, 0, 0),  // East  (+X)
-            new Vector3Int(0, 0, -1), // South (-Z)
-            new Vector3Int(-1, 0, 0), // West  (-X)
+            new Vector3Int(0, 0, 0),
+            new Vector3Int(1, 0, 0),
+            new Vector3Int(0, 0, 1),
+            new Vector3Int(1, 0, 1),
         };
 
-        private static readonly TileSide[] OrthogonalSides =
+        /// <summary>True if this layer has a painted logical tile of the given type at cellPosition.</summary>
+        public bool HasTileOfType(Vector3Int cellPosition, string tileType)
         {
-            TileSide.North, TileSide.East, TileSide.South, TileSide.West
-        };
-
-        private static readonly Vector3Int[] DiagonalOffsets =
-        {
-            new Vector3Int(1, 0, 1),   // NE
-            new Vector3Int(1, 0, -1),  // SE
-            new Vector3Int(-1, 0, -1), // SW
-            new Vector3Int(-1, 0, 1),  // NW
-        };
-
-        private static readonly TileCorner[] DiagonalCorners =
-        {
-            TileCorner.NE, TileCorner.SE, TileCorner.SW, TileCorner.NW
-        };
-
-        /// <summary>Cells orthogonally adjacent to the given cell (N, E, S, W order).</summary>
-        public Vector3Int[] GetOrthogonalNeighborCells(Vector3Int cellPosition)
-        {
-            Vector3Int[] result = new Vector3Int[OrthogonalOffsets.Length];
-            for (int i = 0; i < OrthogonalOffsets.Length; i++)
-                result[i] = cellPosition + OrthogonalOffsets[i];
-            return result;
+            return tiles.Exists(t => t != null && t.TileType == tileType && t.CellPosition.x == cellPosition.x && t.CellPosition.z == cellPosition.z);
         }
 
-        /// <summary>All 8 cells around the given cell (4 orthogonal + 4 diagonal).</summary>
-        public Vector3Int[] GetAllNeighborCells(Vector3Int cellPosition)
+        private DualDisplayTile FindDisplayTile(Vector3Int displayCellPosition, string tileType)
         {
-            Vector3Int[] result = new Vector3Int[OrthogonalOffsets.Length + DiagonalOffsets.Length];
-            for (int i = 0; i < OrthogonalOffsets.Length; i++)
-                result[i] = cellPosition + OrthogonalOffsets[i];
-            for (int i = 0; i < DiagonalOffsets.Length; i++)
-                result[OrthogonalOffsets.Length + i] = cellPosition + DiagonalOffsets[i];
-            return result;
+            return displayTiles.Find(d => d != null && d.TileType == tileType && d.CellPosition.x == displayCellPosition.x && d.CellPosition.z == displayCellPosition.z);
         }
 
         /// <summary>
-        /// Computes which orthogonal sides of a cell have an existing tile of
-        /// the same tileType in this layer, for use with auto tiling.
+        /// World-space (X/Z only) position of the corner shared by the 4
+        /// logical cells a display tile at displayCellPosition straddles.
         /// </summary>
-        public TileSide GetNeighborMask(Vector3Int cellPosition, string tileType)
-        {
-            TileSide mask = TileSide.None;
-
-            for (int i = 0; i < OrthogonalOffsets.Length; i++)
-            {
-                Tile neighborTile = GetTileAt(cellPosition + OrthogonalOffsets[i]);
-                if (neighborTile != null && neighborTile.TileType == tileType)
-                {
-                    mask |= OrthogonalSides[i];
-                }
-            }
-
-            return mask;
-        }
-
-        /// <summary>
-        /// Computes which diagonal neighbours of a cell have an existing tile
-        /// of the same tileType in this layer, used to detect inner corners.
-        /// </summary>
-        public TileCorner GetCornerMask(Vector3Int cellPosition, string tileType)
-        {
-            TileCorner mask = TileCorner.None;
-
-            for (int i = 0; i < DiagonalOffsets.Length; i++)
-            {
-                Tile neighborTile = GetTileAt(cellPosition + DiagonalOffsets[i]);
-                if (neighborTile != null && neighborTile.TileType == tileType)
-                {
-                    mask |= DiagonalCorners[i];
-                }
-            }
-
-            return mask;
-        }
-
-        /// <summary>
-        /// Instantiates a prefab as a visual piece for the given cell, offset
-        /// by localOffset (world-space X/Z units, before being converted into
-        /// this layer's local space) from the cell centre - used to position
-        /// small edge/corner overlay pieces along the correct side or in the
-        /// correct corner of the cell instead of dead centre. Pass
-        /// Vector2.zero for a piece that should cover the whole cell (e.g.
-        /// the Flat base). See AutoTileMask.BuildPieces.
-        /// </summary>
-        public GameObject CreatePiecePrefabInstance(Vector3Int cellPosition, GameObject prefab, float rotationY, Vector2 localOffset, string name)
+        public Vector3 GetDualDisplayLocalPosition(Vector3Int displayCellPosition)
         {
             if (grid == null) EnsureGrid();
-            if (grid == null || prefab == null) return null;
+            if (grid == null) return Vector3.zero;
 
-            Vector3 gridPosition = grid.GetCellCenterWorld(cellPosition);
-            Vector3 localPos = new Vector3(gridPosition.x + localOffset.x, 0f, gridPosition.z + localOffset.y);
-            localPos = transform.InverseTransformPoint(localPos);
+            Vector3 corner = grid.CellToWorld(displayCellPosition);
+            return new Vector3(corner.x, 0f, corner.z);
+        }
+
+        /// <summary>
+        /// Recomputes and applies the correct dual-grid visual (shape +
+        /// rotation, or none at all) for a single display cell of the given
+        /// tile type, using biome to pick the prefab.
+        /// </summary>
+        public void RefreshDualDisplayCell(Vector3Int displayCellPosition, string tileType, TileBiomeData biome)
+        {
+            bool topLeft = HasTileOfType(displayCellPosition + new Vector3Int(-1, 0, 0), tileType);
+            bool topRight = HasTileOfType(displayCellPosition, tileType);
+            bool botLeft = HasTileOfType(displayCellPosition + new Vector3Int(-1, 0, -1), tileType);
+            bool botRight = HasTileOfType(displayCellPosition + new Vector3Int(0, 0, -1), tileType);
+
+            GameObject prefab = null;
+            int rotationSteps = 0;
+
+            if (biome != null && DualGridAutoTile.TryGetShape(topLeft, topRight, botLeft, botRight, out DualTileShape shape, out rotationSteps))
+                biome.TryGetDualTilePrefab(tileType, shape, out prefab);
+
+            DualDisplayTile existing = FindDisplayTile(displayCellPosition, tileType);
+            if (existing != null)
+            {
+                displayTiles.Remove(existing);
+                DestroyDisplayObject(existing.gameObject);
+            }
+
+            if (prefab == null)
+                return;
+
+            if (grid == null) EnsureGrid();
+            if (grid == null) return;
+
+            Vector3 localPos = transform.InverseTransformPoint(GetDualDisplayLocalPosition(displayCellPosition));
 
             GameObject obj;
 #if UNITY_EDITOR
             obj = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
             if (obj == null)
                 obj = Object.Instantiate(prefab);
-            Undo.RegisterCreatedObjectUndo(obj, "Auto Tile Piece");
+            Undo.RegisterCreatedObjectUndo(obj, "Auto Tile Display");
 #else
             obj = Object.Instantiate(prefab);
 #endif
             obj.transform.SetParent(transform, false);
             obj.transform.localPosition = new Vector3(localPos.x, 0f, localPos.z);
-            obj.transform.localRotation = Quaternion.Euler(0f, rotationY, 0f);
-            obj.name = name;
-            return obj;
+            obj.transform.localRotation = Quaternion.Euler(0f, rotationSteps * 90f, 0f);
+            obj.name = $"Display_{tileType}_{displayCellPosition.x}_{displayCellPosition.z}";
+
+            DualDisplayTile displayTile = obj.GetComponent<DualDisplayTile>();
+            if (displayTile == null)
+                displayTile = obj.AddComponent<DualDisplayTile>();
+            displayTile.Initialize(displayCellPosition, tileType);
+            displayTiles.Add(displayTile);
         }
 
-        /// <summary>Destroys a tile's GameObject together with all of its extra composite pieces.</summary>
-        public void DestroyTileVisual(Tile tile)
+        private static void DestroyDisplayObject(GameObject obj)
         {
-            if (tile == null) return;
-
-            foreach (GameObject piece in tile.ExtraPieces)
-            {
-                if (piece == null) continue;
-#if UNITY_EDITOR
-                if (!Application.isPlaying)
-                    Undo.DestroyObjectImmediate(piece);
-                else
-                    Destroy(piece);
-#else
-                Destroy(piece);
-#endif
-            }
-            tile.ExtraPieces.Clear();
-
+            if (obj == null) return;
 #if UNITY_EDITOR
             if (!Application.isPlaying)
-                Undo.DestroyObjectImmediate(tile.gameObject);
+                Undo.DestroyObjectImmediate(obj);
             else
-                Destroy(tile.gameObject);
+                Destroy(obj);
 #else
-            Destroy(tile.gameObject);
+            Destroy(obj);
 #endif
         }
 
         /// <summary>
-        /// Replaces an existing tile's GameObject (and any extra composite
-        /// pieces) with a new set of prefab instances at the given cell,
-        /// keeping the same cell/tileType and its slot in the Tiles list. The
-        /// first piece becomes the new primary tile object (holding the Tile
-        /// component); any further pieces are layered on top as extra pieces.
-        /// Used to re-evaluate neighbours after painting/erasing so their
-        /// shape/rotation stays correct.
+        /// Refreshes all 4 dual-grid display cells that sample the given
+        /// logical cell - call this right after painting or erasing a
+        /// logical tile so its visual border updates on both sides of the
+        /// change.
         /// </summary>
-        public Tile ApplyAutoTileVisual(Tile tile, System.Collections.Generic.List<(GameObject prefab, float rotationY, Vector2 localOffset)> pieces)
+        public void RefreshDualDisplayAround(Vector3Int logicalCellPosition, string tileType, TileBiomeData biome)
         {
-            if (tile == null || pieces == null || pieces.Count == 0 || grid == null) return tile;
-
-            Vector3Int cellPosition = tile.CellPosition;
-            string tileType = tile.TileType;
-            GameObject oldObject = tile.gameObject;
-            var oldExtraPieces = new System.Collections.Generic.List<GameObject>(tile.ExtraPieces);
-
-            GameObject newObject = CreatePiecePrefabInstance(cellPosition, pieces[0].prefab, pieces[0].rotationY, pieces[0].localOffset, $"Tile_{cellPosition.x}_{cellPosition.z}");
-
-            Tile newTile = newObject.GetComponent<Tile>();
-            if (newTile == null)
-                newTile = newObject.AddComponent<Tile>();
-            newTile.Initialize(cellPosition, tileType);
-
-            for (int i = 1; i < pieces.Count; i++)
-            {
-                GameObject extra = CreatePiecePrefabInstance(cellPosition, pieces[i].prefab, pieces[i].rotationY, pieces[i].localOffset, $"Tile_{cellPosition.x}_{cellPosition.z}_extra{i}");
-                if (extra != null)
-                    newTile.ExtraPieces.Add(extra);
-            }
-
-            int index = tiles.IndexOf(tile);
-            if (index >= 0)
-                tiles[index] = newTile;
-            else
-                tiles.Add(newTile);
-
-            foreach (GameObject piece in oldExtraPieces)
-            {
-                if (piece == null) continue;
-#if UNITY_EDITOR
-                if (!Application.isPlaying)
-                    Undo.DestroyObjectImmediate(piece);
-                else
-                    Destroy(piece);
-#else
-                Destroy(piece);
-#endif
-            }
-
-#if UNITY_EDITOR
-            if (!Application.isPlaying)
-                Undo.DestroyObjectImmediate(oldObject);
-            else
-                Destroy(oldObject);
-#else
-            Destroy(oldObject);
-#endif
-
-            return newTile;
+            foreach (Vector3Int offset in DualDisplayOffsets)
+                RefreshDualDisplayCell(logicalCellPosition + offset, tileType, biome);
         }
 
         public List<Tile> GetTilesByType(string tileType)
