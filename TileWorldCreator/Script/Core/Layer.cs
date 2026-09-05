@@ -251,6 +251,106 @@ namespace TileWorldCreator
             return tiles.Find(t => t.CellPosition.x == cellPosition.x && t.CellPosition.z == cellPosition.z);
         }
 
+        // ============ AUTO TILE ============
+
+        private static readonly Vector3Int[] OrthogonalOffsets =
+        {
+            new Vector3Int(0, 0, 1),  // North (+Z)
+            new Vector3Int(1, 0, 0),  // East  (+X)
+            new Vector3Int(0, 0, -1), // South (-Z)
+            new Vector3Int(-1, 0, 0), // West  (-X)
+        };
+
+        private static readonly TileSide[] OrthogonalSides =
+        {
+            TileSide.North, TileSide.East, TileSide.South, TileSide.West
+        };
+
+        /// <summary>Cells orthogonally adjacent to the given cell (N, E, S, W order).</summary>
+        public Vector3Int[] GetOrthogonalNeighborCells(Vector3Int cellPosition)
+        {
+            Vector3Int[] result = new Vector3Int[OrthogonalOffsets.Length];
+            for (int i = 0; i < OrthogonalOffsets.Length; i++)
+                result[i] = cellPosition + OrthogonalOffsets[i];
+            return result;
+        }
+
+        /// <summary>
+        /// Computes which orthogonal sides of a cell have an existing tile of
+        /// the same tileType in this layer, for use with auto tiling.
+        /// </summary>
+        public TileSide GetNeighborMask(Vector3Int cellPosition, string tileType)
+        {
+            TileSide mask = TileSide.None;
+
+            for (int i = 0; i < OrthogonalOffsets.Length; i++)
+            {
+                Tile neighborTile = GetTileAt(cellPosition + OrthogonalOffsets[i]);
+                if (neighborTile != null && neighborTile.TileType == tileType)
+                {
+                    mask |= OrthogonalSides[i];
+                }
+            }
+
+            return mask;
+        }
+
+        /// <summary>
+        /// Replaces an existing tile's GameObject with a new prefab instance at
+        /// the given Y rotation, keeping the same cell/tileType and its slot in
+        /// the Tiles list. Used to re-evaluate neighbours after painting so
+        /// their shape/rotation stays correct.
+        /// </summary>
+        public Tile ApplyAutoTileVisual(Tile tile, GameObject prefab, float rotationY)
+        {
+            if (tile == null || prefab == null || grid == null) return tile;
+
+            Vector3Int cellPosition = tile.CellPosition;
+            string tileType = tile.TileType;
+            GameObject oldObject = tile.gameObject;
+
+            Vector3 gridPosition = grid.GetCellCenterWorld(cellPosition);
+            Vector3 localPos = new Vector3(gridPosition.x, 0f, gridPosition.z);
+            localPos = transform.InverseTransformPoint(localPos);
+
+            GameObject newObject;
+#if UNITY_EDITOR
+            newObject = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+            if (newObject == null)
+                newObject = Object.Instantiate(prefab);
+            Undo.RegisterCreatedObjectUndo(newObject, "Auto Tile Refresh");
+#else
+            newObject = Object.Instantiate(prefab);
+#endif
+
+            newObject.transform.SetParent(transform, false);
+            newObject.transform.localPosition = new Vector3(localPos.x, 0f, localPos.z);
+            newObject.transform.localRotation = Quaternion.Euler(0f, rotationY, 0f);
+            newObject.name = $"Tile_{cellPosition.x}_{cellPosition.z}";
+
+            Tile newTile = newObject.GetComponent<Tile>();
+            if (newTile == null)
+                newTile = newObject.AddComponent<Tile>();
+            newTile.Initialize(cellPosition, tileType);
+
+            int index = tiles.IndexOf(tile);
+            if (index >= 0)
+                tiles[index] = newTile;
+            else
+                tiles.Add(newTile);
+
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+                Undo.DestroyObjectImmediate(oldObject);
+            else
+                Destroy(oldObject);
+#else
+            Destroy(oldObject);
+#endif
+
+            return newTile;
+        }
+
         public List<Tile> GetTilesByType(string tileType)
         {
             return tiles.FindAll(t => t.TileType == tileType);
