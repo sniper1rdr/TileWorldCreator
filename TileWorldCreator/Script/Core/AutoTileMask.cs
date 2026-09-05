@@ -25,23 +25,37 @@ namespace TileWorldCreator
         All = North | East | South | West
     }
 
+    /// <summary>
+    /// Bit flags describing which DIAGONAL neighbours connect to a same-type
+    /// tile. Only used to detect an inner corner (a notch cut into an
+    /// otherwise fully-surrounded tile). Cyclic clockwise order NE-SE-SW-NW
+    /// matches the TileSide clockwise order (NE sits between North and East).
+    /// </summary>
+    [System.Flags]
+    public enum TileCorner
+    {
+        None = 0,
+        NE = 1,
+        SE = 2,
+        SW = 4,
+        NW = 8,
+        All = NE | SE | SW | NW
+    }
+
     public enum AutoTileShape
     {
-        Isolated,   // 0 connected sides
-        EndCap,     // 1 connected side (dead end)
-        Straight,   // 2 connected opposite sides
-        Corner,     // 2 connected adjacent sides
-        TJunction,  // 3 connected sides
-        Cross       // 4 connected sides
+        Flat,         // fully surrounded on all 4 sides + all 4 diagonals
+        StraightEdge, // connected on 3 sides, border on the 4th
+        OuterCorner,  // connected on 2 adjacent sides, border on the other 2
+        InnerCorner   // connected on all 4 sides but a single diagonal is missing
     }
 
     public static class AutoTileMask
     {
         // Canonical (0 degree) masks each role prefab is authored against.
-        public const TileSide EndCapBase = TileSide.North;
-        public const TileSide StraightBase = TileSide.North | TileSide.South;
-        public const TileSide CornerBase = TileSide.North | TileSide.East;
-        public const TileSide TJunctionBase = TileSide.North | TileSide.East | TileSide.South;
+        public const TileSide StraightEdgeBase = TileSide.North | TileSide.East | TileSide.South; // border on West
+        public const TileSide OuterCornerBase = TileSide.North | TileSide.East;                    // border on South+West
+        public const TileCorner InnerCornerBase = TileCorner.SE | TileCorner.SW | TileCorner.NW;   // notch on NE
 
         /// <summary>Rotates a side mask 90 degrees clockwise (as seen from above).</summary>
         public static TileSide RotateClockwise(TileSide mask)
@@ -51,6 +65,17 @@ namespace TileWorldCreator
             if ((mask & TileSide.North) != 0) result |= TileSide.East;
             if ((mask & TileSide.East) != 0) result |= TileSide.South;
             if ((mask & TileSide.South) != 0) result |= TileSide.West;
+            return result;
+        }
+
+        /// <summary>Rotates a corner mask 90 degrees clockwise (as seen from above).</summary>
+        public static TileCorner RotateClockwise(TileCorner mask)
+        {
+            TileCorner result = TileCorner.None;
+            if ((mask & TileCorner.NW) != 0) result |= TileCorner.NE;
+            if ((mask & TileCorner.NE) != 0) result |= TileCorner.SE;
+            if ((mask & TileCorner.SE) != 0) result |= TileCorner.SW;
+            if ((mask & TileCorner.SW) != 0) result |= TileCorner.NW;
             return result;
         }
 
@@ -64,50 +89,63 @@ namespace TileWorldCreator
             return count;
         }
 
-        private static bool IsOpposite(TileSide mask)
+        private static bool IsAdjacentPair(TileSide mask)
         {
-            return mask == (TileSide.North | TileSide.South) || mask == (TileSide.East | TileSide.West);
+            return mask == (TileSide.North | TileSide.East) ||
+                   mask == (TileSide.East | TileSide.South) ||
+                   mask == (TileSide.South | TileSide.West) ||
+                   mask == (TileSide.West | TileSide.North);
         }
 
         /// <summary>
-        /// Classifies a neighbour mask into a rotation-invariant shape and returns
+        /// Classifies a tile into one of the 4 rotation-only shapes and returns
         /// how many 90 degree clockwise steps must be applied to a 0-degree
-        /// authored role prefab so its connections line up with the actual mask.
+        /// authored role prefab so its connections line up with the actual
+        /// neighbours.
+        ///
+        /// orthoMask must be computed from the 4 orthogonal same-type
+        /// neighbours, cornerMask from the 4 diagonal same-type neighbours
+        /// (cornerMask is only consulted when all 4 orthogonal sides connect).
+        ///
+        /// Note: a lone tile, a tile with a single connection, or a 1-wide
+        /// strip (2 opposite sides connected) cannot be represented by these 4
+        /// whole-tile shapes - they fall back to Flat since there is no other
+        /// pool to draw from.
         /// </summary>
-        public static AutoTileShape Classify(TileSide mask, out int rotationSteps)
+        public static AutoTileShape Classify(TileSide orthoMask, TileCorner cornerMask, out int rotationSteps)
         {
-            int count = CountSides(mask);
+            int sideCount = CountSides(orthoMask);
 
-            switch (count)
+            if (sideCount == 4)
             {
-                case 0:
+                if (cornerMask == TileCorner.All)
+                {
                     rotationSteps = 0;
-                    return AutoTileShape.Isolated;
+                    return AutoTileShape.Flat;
+                }
 
-                case 1:
-                    rotationSteps = FindRotation(EndCapBase, mask);
-                    return AutoTileShape.EndCap;
-
-                case 2:
-                    if (IsOpposite(mask))
-                    {
-                        rotationSteps = FindRotation(StraightBase, mask);
-                        return AutoTileShape.Straight;
-                    }
-                    rotationSteps = FindRotation(CornerBase, mask);
-                    return AutoTileShape.Corner;
-
-                case 3:
-                    rotationSteps = FindRotation(TJunctionBase, mask);
-                    return AutoTileShape.TJunction;
-
-                default:
-                    rotationSteps = 0;
-                    return AutoTileShape.Cross;
+                rotationSteps = FindCornerRotation(InnerCornerBase, cornerMask);
+                return AutoTileShape.InnerCorner;
             }
+
+            if (sideCount == 3)
+            {
+                rotationSteps = FindSideRotation(StraightEdgeBase, orthoMask);
+                return AutoTileShape.StraightEdge;
+            }
+
+            if (sideCount == 2 && IsAdjacentPair(orthoMask))
+            {
+                rotationSteps = FindSideRotation(OuterCornerBase, orthoMask);
+                return AutoTileShape.OuterCorner;
+            }
+
+            // sideCount == 0, 1, or 2-opposite: no dedicated shape, fall back to Flat.
+            rotationSteps = 0;
+            return AutoTileShape.Flat;
         }
 
-        private static int FindRotation(TileSide baseMask, TileSide targetMask)
+        private static int FindSideRotation(TileSide baseMask, TileSide targetMask)
         {
             TileSide current = baseMask;
             for (int step = 0; step < 4; step++)
@@ -117,8 +155,21 @@ namespace TileWorldCreator
                 current = RotateClockwise(current);
             }
 
-            // Should never happen for a mask with the same side-count as baseMask.
-            Debug.LogWarning($"AutoTileMask: could not match mask {targetMask} against base {baseMask}");
+            Debug.LogWarning($"AutoTileMask: could not match side mask {targetMask} against base {baseMask}");
+            return 0;
+        }
+
+        private static int FindCornerRotation(TileCorner baseMask, TileCorner targetMask)
+        {
+            TileCorner current = baseMask;
+            for (int step = 0; step < 4; step++)
+            {
+                if (current == targetMask)
+                    return step;
+                current = RotateClockwise(current);
+            }
+
+            Debug.LogWarning($"AutoTileMask: could not match corner mask {targetMask} against base {baseMask}");
             return 0;
         }
     }

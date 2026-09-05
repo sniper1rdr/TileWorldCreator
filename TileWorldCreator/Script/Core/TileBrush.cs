@@ -258,21 +258,13 @@ namespace TileWorldCreator
             {
                 GameObject tilePrefab = null;
                 float rotationY = 0f;
-                bool usedAutoTile = false;
 
                 if (currentBiome != null)
                 {
-                    if (currentBiome.useAutoTiling)
-                    {
-                        // Считаем маску соседей ДО постановки тайла - соседняя ячейка ещё не занята текущим тайлом
-                        TileSide neighborMask = targetLayer.GetNeighborMask(cellPosition, currentTileType);
-                        tilePrefab = currentBiome.GetAutoTile(currentTileType, neighborMask, out rotationY);
-                        usedAutoTile = true;
-                    }
-                    else
-                    {
-                        tilePrefab = currentBiome.GetRandomTile(currentTileType);
-                    }
+                    // Считаем маски соседей ДО постановки тайла - ячейка ещё не занята текущим тайлом
+                    TileSide orthoMask = targetLayer.GetNeighborMask(cellPosition, currentTileType);
+                    TileCorner cornerMask = targetLayer.GetCornerMask(cellPosition, currentTileType);
+                    tilePrefab = currentBiome.GetAutoTile(currentTileType, orthoMask, cornerMask, out rotationY);
                 }
 
                 if (tilePrefab != null)
@@ -308,7 +300,7 @@ namespace TileWorldCreator
                     // Convert to local
                     Vector3 local = targetLayer.transform.InverseTransformPoint(localPos);
                     newTile.transform.localPosition = local;
-                    newTile.transform.localRotation = usedAutoTile ? Quaternion.Euler(0f, rotationY, 0f) : Quaternion.identity;
+                    newTile.transform.localRotation = Quaternion.Euler(0f, rotationY, 0f);
                     newTile.name = $"Tile_{cellPosition.x}_{cellPosition.z}";
 
                     Tile tileComponent = newTile.GetComponent<Tile>();
@@ -321,10 +313,7 @@ namespace TileWorldCreator
                         targetLayer.Tiles.Add(tileComponent);
                     }
 
-                    if (usedAutoTile)
-                    {
-                        RefreshAutoTileNeighbors(cellPosition, currentTileType);
-                    }
+                    RefreshAutoTileNeighbors(cellPosition, currentTileType);
                 }
                 else
                 {
@@ -338,20 +327,21 @@ namespace TileWorldCreator
         
         /// <summary>
         /// After placing a tile, re-evaluates the auto tile shape/rotation of
-        /// its orthogonal same-type neighbours - they may now need to switch
-        /// from e.g. an EndCap to a Corner/Straight/TJunction piece.
+        /// all 8 same-type neighbours (orthogonal + diagonal) - they may now
+        /// need to switch shape (e.g. Flat -> InnerCorner) or rotation.
         /// </summary>
         private void RefreshAutoTileNeighbors(Vector3Int cellPosition, string tileType)
         {
-            if (targetLayer == null || currentBiome == null || !currentBiome.useAutoTiling) return;
+            if (targetLayer == null || currentBiome == null) return;
 
-            foreach (Vector3Int neighborCell in targetLayer.GetOrthogonalNeighborCells(cellPosition))
+            foreach (Vector3Int neighborCell in targetLayer.GetAllNeighborCells(cellPosition))
             {
                 Tile neighborTile = targetLayer.GetTileAt(neighborCell);
                 if (neighborTile == null || neighborTile.TileType != tileType) continue;
 
-                TileSide neighborMask = targetLayer.GetNeighborMask(neighborCell, tileType);
-                GameObject prefab = currentBiome.GetAutoTile(tileType, neighborMask, out float rotationY);
+                TileSide orthoMask = targetLayer.GetNeighborMask(neighborCell, tileType);
+                TileCorner cornerMask = targetLayer.GetCornerMask(neighborCell, tileType);
+                GameObject prefab = currentBiome.GetAutoTile(tileType, orthoMask, cornerMask, out float rotationY);
                 if (prefab == null) continue;
 
                 targetLayer.ApplyAutoTileVisual(neighborTile, prefab, rotationY);

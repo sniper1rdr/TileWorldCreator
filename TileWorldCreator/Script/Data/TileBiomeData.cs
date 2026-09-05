@@ -3,27 +3,32 @@ using UnityEngine;
 namespace TileWorldCreator
 {
     /// <summary>
-    /// One prefab pool per auto tile shape. All prefabs in a pool must be
-    /// authored at 0 degrees Y rotation matching the shape's canonical mask
-    /// (see AutoTileMask) - the brush only ever rotates them in 90 degree
-    /// clockwise steps, it never mirrors or reorders neighbours for you.
-    /// Leave a pool empty to fall back to a plain random tile for that shape.
+    /// One prefab pool per auto tile shape for a single tile type (Ground /
+    /// Liquid / Decorative). All prefabs in a pool must be authored at 0
+    /// degrees Y rotation matching the shape's canonical mask (see
+    /// AutoTileMask) - the brush only ever rotates them in 90 degree
+    /// clockwise steps, it never mirrors/flips them.
     /// </summary>
     [System.Serializable]
-    public class AutoTileRoleSet
+    public class TerrainAutoTileSet
     {
-        [Tooltip("No connected same-type neighbours.")]
-        public GameObject[] isolated;
-        [Tooltip("Exactly 1 connected neighbour (dead end). Authored connecting North.")]
-        public GameObject[] endCap;
-        [Tooltip("2 connected opposite neighbours (straight run). Authored connecting North+South.")]
-        public GameObject[] straight;
-        [Tooltip("2 connected adjacent neighbours (L bend). Authored connecting North+East.")]
-        public GameObject[] corner;
-        [Tooltip("3 connected neighbours (T junction). Authored connecting North+East+South.")]
-        public GameObject[] tJunction;
-        [Tooltip("All 4 neighbours connected.")]
-        public GameObject[] cross;
+        [Tooltip("Ровная земля: тайл окружён тем же типом со всех 4 сторон и по всем 4 диагоналям.")]
+        public GameObject[] flat;
+
+        [Tooltip("Прямой край: соединение с 3 сторон, граница с 4-й (по умолчанию граница на West, соединения North+East+South).")]
+        public GameObject[] straightEdge;
+
+        [Tooltip("Внешний угол: соединение с 2 соседних сторон (по умолчанию North+East), граница с двух других.")]
+        public GameObject[] outerCorner;
+
+        [Tooltip("Внутренний угол: все 4 стороны соединены, но одна диагональ \"вырезана\" (по умолчанию вырез на NE).")]
+        public GameObject[] innerCorner;
+
+        public bool IsValid =>
+            (flat != null && flat.Length > 0) ||
+            (straightEdge != null && straightEdge.Length > 0) ||
+            (outerCorner != null && outerCorner.Length > 0) ||
+            (innerCorner != null && innerCorner.Length > 0);
     }
 
     [CreateAssetMenu(menuName = "TileWorld/Biome Data", fileName = "TileBiomeData")]
@@ -33,17 +38,14 @@ namespace TileWorldCreator
         public string biomeId;
         public string displayName;
 
-        [Header("Tile Prefabs")]
-        public GameObject[] groundTiles;
-        public GameObject[] liquidTiles;
-        public GameObject[] decorativeTiles;
+        [Header("Ground Tiles (Auto Tile)")]
+        public TerrainAutoTileSet groundTiles;
 
-        [Header("Auto Tiling")]
-        [Tooltip("When enabled, the Level brush picks tile shape + rotation from the pools below based on same-type neighbours instead of a plain random tile.")]
-        public bool useAutoTiling = false;
-        public AutoTileRoleSet groundAutoTiles;
-        public AutoTileRoleSet liquidAutoTiles;
-        public AutoTileRoleSet decorativeAutoTiles;
+        [Header("Liquid Tiles (Auto Tile)")]
+        public TerrainAutoTileSet liquidTiles;
+
+        [Header("Decorative Tiles (Auto Tile)")]
+        public TerrainAutoTileSet decorativeTiles;
 
         [Header("Environment - Rocks")]
         public GameObject[] rocks;
@@ -67,12 +69,12 @@ namespace TileWorldCreator
         public bool randomRotation = true;
         public Vector2 randomScaleRange = new Vector2(0.8f, 1.2f);
 
-        public bool IsValid => 
-            !string.IsNullOrWhiteSpace(biomeId) && 
-            groundTiles != null && 
-            groundTiles.Length > 0;
+        public bool IsValid =>
+            !string.IsNullOrWhiteSpace(biomeId) &&
+            groundTiles != null &&
+            groundTiles.IsValid;
 
-        public GameObject[] GetTiles(string tileType)
+        private TerrainAutoTileSet GetTileSet(string tileType)
         {
             switch (tileType)
             {
@@ -85,15 +87,6 @@ namespace TileWorldCreator
                 default:
                     return groundTiles;
             }
-        }
-
-        public GameObject GetRandomTile(string tileType)
-        {
-            GameObject[] tiles = GetTiles(tileType);
-            if (tiles == null || tiles.Length == 0)
-                return null;
-            
-            return tiles[Random.Range(0, tiles.Length)];
         }
 
         public GameObject[] GetEnvironmentObjects(string category)
@@ -118,7 +111,7 @@ namespace TileWorldCreator
             GameObject[] objects = GetEnvironmentObjects(category);
             if (objects == null || objects.Length == 0)
                 return null;
-            
+
             return objects[Random.Range(0, objects.Length)];
         }
 
@@ -129,60 +122,48 @@ namespace TileWorldCreator
         }
 
         /// <summary>
-        /// Picks a tile prefab + Y rotation (in degrees) for the given neighbour
-        /// mask, based on this biome's auto tile role pools. Falls back to a
-        /// plain random tile (0 degrees rotation) when auto tiling is disabled
-        /// or no prefab is authored for the resolved shape.
+        /// Picks a tile prefab + Y rotation (in degrees) for the given
+        /// neighbour masks, based on this biome's auto tile pools.
+        /// orthoMask/cornerMask should come from Layer.GetNeighborMask /
+        /// Layer.GetCornerMask for the cell being painted.
         /// </summary>
-        public GameObject GetAutoTile(string tileType, TileSide neighborMask, out float rotationY)
+        public GameObject GetAutoTile(string tileType, TileSide orthoMask, TileCorner cornerMask, out float rotationY)
         {
             rotationY = 0f;
 
-            AutoTileRoleSet roleSet = GetAutoTileRoleSet(tileType);
-            if (roleSet == null)
-                return GetRandomTile(tileType);
+            TerrainAutoTileSet tileSet = GetTileSet(tileType);
+            if (tileSet == null)
+                return null;
 
-            AutoTileShape shape = AutoTileMask.Classify(neighborMask, out int rotationSteps);
-            GameObject[] pool = GetRolePool(roleSet, shape);
+            AutoTileShape shape = AutoTileMask.Classify(orthoMask, cornerMask, out int rotationSteps);
+            GameObject[] pool = GetRolePool(tileSet, shape);
+
+            // No dedicated prefab for the resolved shape - fall back to the Flat pool (no rotation).
+            if ((pool == null || pool.Length == 0) && shape != AutoTileShape.Flat)
+            {
+                pool = tileSet.flat;
+                rotationSteps = 0;
+            }
 
             if (pool == null || pool.Length == 0)
-                return GetRandomTile(tileType);
+                return null;
 
             rotationY = rotationSteps * 90f;
             return pool[Random.Range(0, pool.Length)];
         }
 
-        private AutoTileRoleSet GetAutoTileRoleSet(string tileType)
-        {
-            switch (tileType)
-            {
-                case "Ground":
-                    return groundAutoTiles;
-                case "Liquid":
-                    return liquidAutoTiles;
-                case "Decorative":
-                    return decorativeAutoTiles;
-                default:
-                    return groundAutoTiles;
-            }
-        }
-
-        private static GameObject[] GetRolePool(AutoTileRoleSet roleSet, AutoTileShape shape)
+        private static GameObject[] GetRolePool(TerrainAutoTileSet tileSet, AutoTileShape shape)
         {
             switch (shape)
             {
-                case AutoTileShape.Isolated:
-                    return roleSet.isolated;
-                case AutoTileShape.EndCap:
-                    return roleSet.endCap;
-                case AutoTileShape.Straight:
-                    return roleSet.straight;
-                case AutoTileShape.Corner:
-                    return roleSet.corner;
-                case AutoTileShape.TJunction:
-                    return roleSet.tJunction;
-                case AutoTileShape.Cross:
-                    return roleSet.cross;
+                case AutoTileShape.Flat:
+                    return tileSet.flat;
+                case AutoTileShape.StraightEdge:
+                    return tileSet.straightEdge;
+                case AutoTileShape.OuterCorner:
+                    return tileSet.outerCorner;
+                case AutoTileShape.InnerCorner:
+                    return tileSet.innerCorner;
                 default:
                     return null;
             }

@@ -266,12 +266,36 @@ namespace TileWorldCreator
             TileSide.North, TileSide.East, TileSide.South, TileSide.West
         };
 
+        private static readonly Vector3Int[] DiagonalOffsets =
+        {
+            new Vector3Int(1, 0, 1),   // NE
+            new Vector3Int(1, 0, -1),  // SE
+            new Vector3Int(-1, 0, -1), // SW
+            new Vector3Int(-1, 0, 1),  // NW
+        };
+
+        private static readonly TileCorner[] DiagonalCorners =
+        {
+            TileCorner.NE, TileCorner.SE, TileCorner.SW, TileCorner.NW
+        };
+
         /// <summary>Cells orthogonally adjacent to the given cell (N, E, S, W order).</summary>
         public Vector3Int[] GetOrthogonalNeighborCells(Vector3Int cellPosition)
         {
             Vector3Int[] result = new Vector3Int[OrthogonalOffsets.Length];
             for (int i = 0; i < OrthogonalOffsets.Length; i++)
                 result[i] = cellPosition + OrthogonalOffsets[i];
+            return result;
+        }
+
+        /// <summary>All 8 cells around the given cell (4 orthogonal + 4 diagonal).</summary>
+        public Vector3Int[] GetAllNeighborCells(Vector3Int cellPosition)
+        {
+            Vector3Int[] result = new Vector3Int[OrthogonalOffsets.Length + DiagonalOffsets.Length];
+            for (int i = 0; i < OrthogonalOffsets.Length; i++)
+                result[i] = cellPosition + OrthogonalOffsets[i];
+            for (int i = 0; i < DiagonalOffsets.Length; i++)
+                result[OrthogonalOffsets.Length + i] = cellPosition + DiagonalOffsets[i];
             return result;
         }
 
@@ -289,6 +313,26 @@ namespace TileWorldCreator
                 if (neighborTile != null && neighborTile.TileType == tileType)
                 {
                     mask |= OrthogonalSides[i];
+                }
+            }
+
+            return mask;
+        }
+
+        /// <summary>
+        /// Computes which diagonal neighbours of a cell have an existing tile
+        /// of the same tileType in this layer, used to detect inner corners.
+        /// </summary>
+        public TileCorner GetCornerMask(Vector3Int cellPosition, string tileType)
+        {
+            TileCorner mask = TileCorner.None;
+
+            for (int i = 0; i < DiagonalOffsets.Length; i++)
+            {
+                Tile neighborTile = GetTileAt(cellPosition + DiagonalOffsets[i]);
+                if (neighborTile != null && neighborTile.TileType == tileType)
+                {
+                    mask |= DiagonalCorners[i];
                 }
             }
 
