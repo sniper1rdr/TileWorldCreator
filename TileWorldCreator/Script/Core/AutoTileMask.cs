@@ -50,6 +50,19 @@ namespace TileWorldCreator
         InnerCorner   // connected on all 4 sides but a single diagonal is missing
     }
 
+    /// <summary>One visual piece (role + rotation) making up a tile's composite look.</summary>
+    public struct AutoTilePiece
+    {
+        public AutoTileShape shape;
+        public int rotationSteps;
+
+        public AutoTilePiece(AutoTileShape shape, int rotationSteps)
+        {
+            this.shape = shape;
+            this.rotationSteps = rotationSteps;
+        }
+    }
+
     public static class AutoTileMask
     {
         // Canonical (0 degree) masks each role prefab is authored against.
@@ -143,6 +156,82 @@ namespace TileWorldCreator
             // sideCount == 0, 1, or 2-opposite: no dedicated shape, fall back to Flat.
             rotationSteps = 0;
             return AutoTileShape.Flat;
+        }
+
+        /// <summary>
+        /// Like <see cref="Classify"/>, but never falls back to a plain Flat
+        /// piece for the 3 under-represented connectivity cases (isolated
+        /// tile, single connection, 1-wide strip). Instead it composes 1 or 2
+        /// existing role pieces (StraightEdge/OuterCorner) so every open side
+        /// that has no real neighbour still shows a border - a placed tile
+        /// should never look like it just floats with an unfinished edge.
+        /// Returns 1 piece for the shapes that already have an exact match,
+        /// 2 pieces for the composite fallback cases. The caller instantiates
+        /// each returned piece and layers them on top of each other in the
+        /// same cell.
+        /// </summary>
+        public static AutoTilePiece[] ClassifyComposite(TileSide orthoMask, TileCorner cornerMask)
+        {
+            int sideCount = CountSides(orthoMask);
+
+            if (sideCount == 4)
+            {
+                if (cornerMask == TileCorner.All)
+                    return new[] { new AutoTilePiece(AutoTileShape.Flat, 0) };
+
+                return new[] { new AutoTilePiece(AutoTileShape.InnerCorner, FindCornerRotation(InnerCornerBase, cornerMask)) };
+            }
+
+            if (sideCount == 3)
+                return new[] { new AutoTilePiece(AutoTileShape.StraightEdge, FindSideRotation(StraightEdgeBase, orthoMask)) };
+
+            if (sideCount == 2 && IsAdjacentPair(orthoMask))
+                return new[] { new AutoTilePiece(AutoTileShape.OuterCorner, FindSideRotation(OuterCornerBase, orthoMask)) };
+
+            if (sideCount == 2)
+            {
+                // Opposite pair connected (1-wide strip) - the 2 open sides are also
+                // opposite each other. OuterCorner pieces only ever cover an ADJACENT
+                // pair, so they can't close 2 opposite sides without also incorrectly
+                // walling off one of the real connections. Use 2 StraightEdge pieces
+                // instead - each closes exactly 1 side, leaving the 2 connected sides
+                // untouched.
+                TileSide openA = (orthoMask == (TileSide.North | TileSide.South)) ? TileSide.East : TileSide.North;
+                TileSide openB = (orthoMask == (TileSide.North | TileSide.South)) ? TileSide.West : TileSide.South;
+
+                int stepA = FindSideRotation(StraightEdgeBase, TileSide.All & ~openA);
+                int stepB = FindSideRotation(StraightEdgeBase, TileSide.All & ~openB);
+                return new[]
+                {
+                    new AutoTilePiece(AutoTileShape.StraightEdge, stepA),
+                    new AutoTilePiece(AutoTileShape.StraightEdge, stepB)
+                };
+            }
+
+            if (sideCount == 1)
+            {
+                // Single connection - 3 open sides. Use the 2 OuterCorner rotations
+                // that do NOT touch the connected side; together their adjacent pairs
+                // cover exactly the 3 open sides with no false wall on the real neighbour.
+                var pieces = new System.Collections.Generic.List<AutoTilePiece>(2);
+                TileSide current = OuterCornerBase;
+                for (int step = 0; step < 4; step++)
+                {
+                    if ((current & orthoMask) == 0)
+                        pieces.Add(new AutoTilePiece(AutoTileShape.OuterCorner, step));
+                    current = RotateClockwise(current);
+                }
+                return pieces.ToArray();
+            }
+
+            // sideCount == 0: fully isolated tile, all 4 sides open. 2 OuterCorner
+            // pieces rotated 180 degrees apart (steps 0 and 2) close N+E and S+W -
+            // exactly all 4 sides, no gaps, no overlap.
+            return new[]
+            {
+                new AutoTilePiece(AutoTileShape.OuterCorner, 0),
+                new AutoTilePiece(AutoTileShape.OuterCorner, 2)
+            };
         }
 
         private static int FindSideRotation(TileSide baseMask, TileSide targetMask)

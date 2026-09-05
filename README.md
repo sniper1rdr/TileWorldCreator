@@ -20,6 +20,9 @@ steps (never mirrors) to line up with the actual neighbours:
 Painting a tile also refreshes all 8 same-type neighbours (orthogonal + diagonal) so
 their shape/rotation stays correct as you keep painting. A single floating tile, a tile
 with only 1 connection, or a 1-tile-wide strip (2 opposite sides connected) can't be
-represented by these 4 whole-tile shapes and fall back to the Flat pool.
+represented by a single one of these 4 whole-tile shapes - the brush layers 2 pieces on
+top of each other in the same cell instead (e.g. 2 Outer Corner pieces rotated 180°
+apart close off all 4 sides of a lone tile), so a placed tile never shows an open,
+un-bordered side. See `AutoTileMask.ClassifyComposite` for the exact composition rules.
 
 See `Script/Core/AutoTileMask.cs` for the exact bitmask/rotation convention.

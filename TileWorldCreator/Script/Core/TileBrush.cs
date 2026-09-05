@@ -215,7 +215,9 @@ namespace TileWorldCreator
 
             Vector3 localPos = targetLayer.GetCellCenterWorld(cellPosition);
             Vector3 worldPos = targetLayer.transform.TransformPoint(localPos);
-            worldPos.y = targetLayer.transform.position.y + 0.01f;
+            // Ставим курсор НАД тайлом/объектом в клетке (а не под его мешем) - иначе его не видно,
+            // особенно в режиме стирания (Ctrl), когда клетка занята.
+            worldPos.y = GetHighlightWorldY(cellPosition);
             
             GameObject highlight = GameObject.CreatePrimitive(PrimitiveType.Quad);
             highlight.name = "GridHighlight";
@@ -287,18 +289,10 @@ namespace TileWorldCreator
             if (tile == null) return;
 
             string tileType = tile.TileType;
-            GameObject tileObject = tile.gameObject;
 
             targetLayer.Tiles.Remove(tile);
-
-#if UNITY_EDITOR
-            if (!Application.isPlaying)
-                UnityEditor.Undo.DestroyObjectImmediate(tileObject);
-            else
-                Object.Destroy(tileObject);
-#else
-            Object.Destroy(tileObject);
-#endif
+            // Уничтожает и сам тайл, и все его доп. куски (углы/края), если они были.
+            targetLayer.DestroyTileVisual(tile);
 
             // Соседи вокруг дыры могли потерять соединение - пересчитываем их форму/поворот
             RefreshAutoTileNeighbors(cellPosition, tileType);
@@ -314,29 +308,7 @@ namespace TileWorldCreator
             EnvironmentRoot envRoot = worldRoot.Environment;
             if (envRoot == null) return;
 
-            Vector3 localPos = targetLayer.GetCellCenterWorld(cellPosition);
-            Vector3 worldPos = targetLayer.transform.TransformPoint(localPos);
-            worldPos.y = targetLayer.transform.position.y;
-
-            float cellSize = 1f;
-            if (targetLayer.Grid != null)
-                cellSize = targetLayer.Grid.cellSize.x;
-            float checkRadius = cellSize * 0.3f;
-
-            GameObject closest = null;
-            float closestDistance = float.MaxValue;
-
-            foreach (GameObject obj in envRoot.EnvironmentObjects)
-            {
-                if (obj == null) continue;
-
-                float dist = Vector3.Distance(obj.transform.position, worldPos);
-                if (dist < checkRadius && dist < closestDistance)
-                {
-                    closest = obj;
-                    closestDistance = dist;
-                }
-            }
+            GameObject closest = FindEnvironmentObjectAtCell(cellPosition);
 
             if (closest != null)
             {
@@ -381,42 +353,25 @@ namespace TileWorldCreator
             // ИСПРАВЛЕНО: Используем новый метод проверки ТОЛЬКО в этом слое
             if (!targetLayer.IsCellOccupiedInThisLayer(cellPosition))
             {
-                GameObject tilePrefab = null;
-                float rotationY = 0f;
+                System.Collections.Generic.List<(GameObject prefab, float rotationY)> pieces = null;
 
                 if (currentBiome != null)
                 {
                     // Считаем маски соседей ДО постановки тайла - ячейка ещё не занята текущим тайлом
                     TileSide orthoMask = targetLayer.GetNeighborMask(cellPosition, currentTileType);
                     TileCorner cornerMask = targetLayer.GetCornerMask(cellPosition, currentTileType);
-                    tilePrefab = currentBiome.GetAutoTile(currentTileType, orthoMask, cornerMask, out rotationY);
+                    pieces = currentBiome.GetAutoTilePieces(currentTileType, orthoMask, cornerMask);
                 }
 
-                if (tilePrefab != null)
+                if (pieces != null && pieces.Count > 0)
                 {
-                    // Создаем через Layer, но CreateTile создаёт временный плэйсхолдер — удаляем его
-                    Tile placeholder = targetLayer.CreateTile(cellPosition, currentTileType);
-                    if (placeholder != null)
-                    {
-                        // Удаляем плэйсхолдер из списка слоёв чтобы не оставить null/дубликат
-                        if (targetLayer.Tiles.Contains(placeholder))
-                            targetLayer.Tiles.Remove(placeholder);
-
 #if UNITY_EDITOR
-                        if (!Application.isPlaying)
-                            UnityEditor.Undo.DestroyObjectImmediate(placeholder.gameObject);
-                        else
-#endif
-                            Object.Destroy(placeholder.gameObject);
-                    }
-
-#if UNITY_EDITOR
-                    GameObject newTile = PrefabUtility.InstantiatePrefab(tilePrefab) as GameObject;
+                    GameObject newTile = PrefabUtility.InstantiatePrefab(pieces[0].prefab) as GameObject;
                     if (newTile == null)
-                        newTile = Object.Instantiate(tilePrefab);
+                        newTile = Object.Instantiate(pieces[0].prefab);
                     Undo.RegisterCreatedObjectUndo(newTile, "Place Tile");
 #else
-                    GameObject newTile = Object.Instantiate(tilePrefab);
+                    GameObject newTile = Object.Instantiate(pieces[0].prefab);
 #endif
 
                     newTile.transform.SetParent(targetLayer.transform, false);
@@ -425,13 +380,22 @@ namespace TileWorldCreator
                     // Convert to local
                     Vector3 local = targetLayer.transform.InverseTransformPoint(localPos);
                     newTile.transform.localPosition = local;
-                    newTile.transform.localRotation = Quaternion.Euler(0f, rotationY, 0f);
+                    newTile.transform.localRotation = Quaternion.Euler(0f, pieces[0].rotationY, 0f);
                     newTile.name = $"Tile_{cellPosition.x}_{cellPosition.z}";
 
                     Tile tileComponent = newTile.GetComponent<Tile>();
                     if (tileComponent == null)
                         tileComponent = newTile.AddComponent<Tile>();
                     tileComponent.Initialize(cellPosition, currentTileType);
+
+                    // Доп. куски (углы/края), нужные для одиночных/частично соединённых
+                    // тайлов, чтобы у них никогда не оставалось незакрытых открытых сторон.
+                    for (int i = 1; i < pieces.Count; i++)
+                    {
+                        GameObject extra = targetLayer.CreatePiecePrefabInstance(cellPosition, pieces[i].prefab, pieces[i].rotationY, $"Tile_{cellPosition.x}_{cellPosition.z}_extra{i}");
+                        if (extra != null)
+                            tileComponent.ExtraPieces.Add(extra);
+                    }
 
                     if (!targetLayer.Tiles.Contains(tileComponent))
                     {
@@ -466,10 +430,10 @@ namespace TileWorldCreator
 
                 TileSide orthoMask = targetLayer.GetNeighborMask(neighborCell, tileType);
                 TileCorner cornerMask = targetLayer.GetCornerMask(neighborCell, tileType);
-                GameObject prefab = currentBiome.GetAutoTile(tileType, orthoMask, cornerMask, out float rotationY);
-                if (prefab == null) continue;
+                var pieces = currentBiome.GetAutoTilePieces(tileType, orthoMask, cornerMask);
+                if (pieces == null || pieces.Count == 0) continue;
 
-                targetLayer.ApplyAutoTileVisual(neighborTile, prefab, rotationY);
+                targetLayer.ApplyAutoTileVisual(neighborTile, pieces);
             }
         }
 
@@ -536,35 +500,77 @@ namespace TileWorldCreator
         
         private bool IsEnvironmentObjectAtCell(Vector3Int cellPosition)
         {
-            if (targetLayer == null) return false;
-            
+            return FindEnvironmentObjectAtCell(cellPosition) != null;
+        }
+
+        /// <summary>Найти ближайший объект окружения в клетке (в радиусе checkRadius от её центра), либо null.</summary>
+        private GameObject FindEnvironmentObjectAtCell(Vector3Int cellPosition)
+        {
+            if (targetLayer == null) return null;
+
             WorldRoot worldRoot = targetLayer.GetComponentInParent<WorldRoot>();
-            if (worldRoot == null) return false;
-            
+            if (worldRoot == null) return null;
+
             EnvironmentRoot envRoot = worldRoot.Environment;
-            if (envRoot == null) return false;
-            
+            if (envRoot == null) return null;
+
             Vector3 localPos = targetLayer.GetCellCenterWorld(cellPosition);
             Vector3 worldPos = targetLayer.transform.TransformPoint(localPos);
             worldPos.y = targetLayer.transform.position.y;
-            
+
             float cellSize = 1f;
             if (targetLayer.Grid != null)
                 cellSize = targetLayer.Grid.cellSize.x;
             float checkRadius = cellSize * 0.3f;
-            
+
+            GameObject closest = null;
+            float closestDistance = float.MaxValue;
+
             foreach (GameObject obj in envRoot.EnvironmentObjects)
             {
                 if (obj == null) continue;
-                
+
                 float distance = Vector3.Distance(obj.transform.position, worldPos);
-                if (distance < checkRadius)
+                if (distance < checkRadius && distance < closestDistance)
                 {
-                    return true;
+                    closest = obj;
+                    closestDistance = distance;
                 }
             }
-            
-            return false;
+
+            return closest;
+        }
+
+        /// <summary>
+        /// Высота (мировая Y), на которой нужно рисовать курсор-подсветку, чтобы он был виден
+        /// НАД тайлом/объектом в клетке, а не спрятан под его мешем.
+        /// </summary>
+        private float GetHighlightWorldY(Vector3Int cellPosition)
+        {
+            float baseY = targetLayer.transform.position.y + 0.01f;
+
+            GameObject occupant = null;
+            if (paintMode == "Level")
+            {
+                Tile tile = targetLayer.GetTileAt(cellPosition);
+                if (tile != null) occupant = tile.gameObject;
+            }
+            else
+            {
+                occupant = FindEnvironmentObjectAtCell(cellPosition);
+            }
+
+            if (occupant == null) return baseY;
+
+            Renderer[] renderers = occupant.GetComponentsInChildren<Renderer>();
+            if (renderers.Length == 0) return baseY;
+
+            Bounds bounds = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++)
+                bounds.Encapsulate(renderers[i].bounds);
+
+            float topY = bounds.max.y + 0.02f;
+            return Mathf.Max(baseY, topY);
         }
         
         // ============ HELPER METHODS ============

@@ -168,6 +168,17 @@ namespace TileWorldCreator
             {
                 if (tile != null)
                 {
+                    foreach (GameObject piece in tile.ExtraPieces)
+                    {
+                        if (piece == null) continue;
+#if UNITY_EDITOR
+                        if (!Application.isPlaying)
+                            UnityEditor.Undo.DestroyObjectImmediate(piece);
+                        else
+#endif
+                            Destroy(piece);
+                    }
+
 #if UNITY_EDITOR
                     if (!Application.isPlaying)
                         UnityEditor.Undo.DestroyObjectImmediate(tile.gameObject);
@@ -340,48 +351,114 @@ namespace TileWorldCreator
         }
 
         /// <summary>
-        /// Replaces an existing tile's GameObject with a new prefab instance at
-        /// the given Y rotation, keeping the same cell/tileType and its slot in
-        /// the Tiles list. Used to re-evaluate neighbours after painting so
-        /// their shape/rotation stays correct.
+        /// Instantiates a prefab as an extra visual piece layered on top of the
+        /// given cell (same position, its own absolute Y rotation). Used for
+        /// composite auto tile pieces (see AutoTileMask.ClassifyComposite).
         /// </summary>
-        public Tile ApplyAutoTileVisual(Tile tile, GameObject prefab, float rotationY)
+        public GameObject CreatePiecePrefabInstance(Vector3Int cellPosition, GameObject prefab, float rotationY, string name)
         {
-            if (tile == null || prefab == null || grid == null) return tile;
-
-            Vector3Int cellPosition = tile.CellPosition;
-            string tileType = tile.TileType;
-            GameObject oldObject = tile.gameObject;
+            if (grid == null) EnsureGrid();
+            if (grid == null || prefab == null) return null;
 
             Vector3 gridPosition = grid.GetCellCenterWorld(cellPosition);
             Vector3 localPos = new Vector3(gridPosition.x, 0f, gridPosition.z);
             localPos = transform.InverseTransformPoint(localPos);
 
-            GameObject newObject;
+            GameObject obj;
 #if UNITY_EDITOR
-            newObject = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-            if (newObject == null)
-                newObject = Object.Instantiate(prefab);
-            Undo.RegisterCreatedObjectUndo(newObject, "Auto Tile Refresh");
+            obj = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+            if (obj == null)
+                obj = Object.Instantiate(prefab);
+            Undo.RegisterCreatedObjectUndo(obj, "Auto Tile Piece");
 #else
-            newObject = Object.Instantiate(prefab);
+            obj = Object.Instantiate(prefab);
 #endif
+            obj.transform.SetParent(transform, false);
+            obj.transform.localPosition = new Vector3(localPos.x, 0f, localPos.z);
+            obj.transform.localRotation = Quaternion.Euler(0f, rotationY, 0f);
+            obj.name = name;
+            return obj;
+        }
 
-            newObject.transform.SetParent(transform, false);
-            newObject.transform.localPosition = new Vector3(localPos.x, 0f, localPos.z);
-            newObject.transform.localRotation = Quaternion.Euler(0f, rotationY, 0f);
-            newObject.name = $"Tile_{cellPosition.x}_{cellPosition.z}";
+        /// <summary>Destroys a tile's GameObject together with all of its extra composite pieces.</summary>
+        public void DestroyTileVisual(Tile tile)
+        {
+            if (tile == null) return;
+
+            foreach (GameObject piece in tile.ExtraPieces)
+            {
+                if (piece == null) continue;
+#if UNITY_EDITOR
+                if (!Application.isPlaying)
+                    Undo.DestroyObjectImmediate(piece);
+                else
+                    Destroy(piece);
+#else
+                Destroy(piece);
+#endif
+            }
+            tile.ExtraPieces.Clear();
+
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+                Undo.DestroyObjectImmediate(tile.gameObject);
+            else
+                Destroy(tile.gameObject);
+#else
+            Destroy(tile.gameObject);
+#endif
+        }
+
+        /// <summary>
+        /// Replaces an existing tile's GameObject (and any extra composite
+        /// pieces) with a new set of prefab instances at the given cell,
+        /// keeping the same cell/tileType and its slot in the Tiles list. The
+        /// first piece becomes the new primary tile object (holding the Tile
+        /// component); any further pieces are layered on top as extra pieces.
+        /// Used to re-evaluate neighbours after painting/erasing so their
+        /// shape/rotation stays correct.
+        /// </summary>
+        public Tile ApplyAutoTileVisual(Tile tile, System.Collections.Generic.List<(GameObject prefab, float rotationY)> pieces)
+        {
+            if (tile == null || pieces == null || pieces.Count == 0 || grid == null) return tile;
+
+            Vector3Int cellPosition = tile.CellPosition;
+            string tileType = tile.TileType;
+            GameObject oldObject = tile.gameObject;
+            var oldExtraPieces = new System.Collections.Generic.List<GameObject>(tile.ExtraPieces);
+
+            GameObject newObject = CreatePiecePrefabInstance(cellPosition, pieces[0].prefab, pieces[0].rotationY, $"Tile_{cellPosition.x}_{cellPosition.z}");
 
             Tile newTile = newObject.GetComponent<Tile>();
             if (newTile == null)
                 newTile = newObject.AddComponent<Tile>();
             newTile.Initialize(cellPosition, tileType);
 
+            for (int i = 1; i < pieces.Count; i++)
+            {
+                GameObject extra = CreatePiecePrefabInstance(cellPosition, pieces[i].prefab, pieces[i].rotationY, $"Tile_{cellPosition.x}_{cellPosition.z}_extra{i}");
+                if (extra != null)
+                    newTile.ExtraPieces.Add(extra);
+            }
+
             int index = tiles.IndexOf(tile);
             if (index >= 0)
                 tiles[index] = newTile;
             else
                 tiles.Add(newTile);
+
+            foreach (GameObject piece in oldExtraPieces)
+            {
+                if (piece == null) continue;
+#if UNITY_EDITOR
+                if (!Application.isPlaying)
+                    Undo.DestroyObjectImmediate(piece);
+                else
+                    Destroy(piece);
+#else
+                Destroy(piece);
+#endif
+            }
 
 #if UNITY_EDITOR
             if (!Application.isPlaying)

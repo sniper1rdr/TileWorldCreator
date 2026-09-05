@@ -122,34 +122,42 @@ namespace TileWorldCreator
         }
 
         /// <summary>
-        /// Picks a tile prefab + Y rotation (in degrees) for the given
-        /// neighbour masks, based on this biome's auto tile pools.
-        /// orthoMask/cornerMask should come from Layer.GetNeighborMask /
-        /// Layer.GetCornerMask for the cell being painted.
+        /// Picks the tile prefab(s) + Y rotation(s) (in degrees) for the given
+        /// neighbour masks, based on this biome's auto tile pools. Usually
+        /// returns a single piece; for isolated/partially-connected tiles it
+        /// returns 2 pieces that must be layered on top of each other so the
+        /// tile never shows an open, un-bordered side. orthoMask/cornerMask
+        /// should come from Layer.GetNeighborMask / Layer.GetCornerMask for
+        /// the cell being painted.
         /// </summary>
-        public GameObject GetAutoTile(string tileType, TileSide orthoMask, TileCorner cornerMask, out float rotationY)
+        public System.Collections.Generic.List<(GameObject prefab, float rotationY)> GetAutoTilePieces(string tileType, TileSide orthoMask, TileCorner cornerMask)
         {
-            rotationY = 0f;
+            var result = new System.Collections.Generic.List<(GameObject prefab, float rotationY)>();
 
             TerrainAutoTileSet tileSet = GetTileSet(tileType);
             if (tileSet == null)
-                return null;
+                return result;
 
-            AutoTileShape shape = AutoTileMask.Classify(orthoMask, cornerMask, out int rotationSteps);
-            GameObject[] pool = GetRolePool(tileSet, shape);
-
-            // No dedicated prefab for the resolved shape - fall back to the Flat pool (no rotation).
-            if ((pool == null || pool.Length == 0) && shape != AutoTileShape.Flat)
+            foreach (AutoTileMask.AutoTilePiece piece in AutoTileMask.ClassifyComposite(orthoMask, cornerMask))
             {
-                pool = tileSet.flat;
-                rotationSteps = 0;
+                GameObject[] pool = GetRolePool(tileSet, piece.shape);
+                int rotationSteps = piece.rotationSteps;
+
+                // No dedicated prefab for the resolved shape - fall back to the Flat pool (no rotation).
+                if ((pool == null || pool.Length == 0) && piece.shape != AutoTileShape.Flat)
+                {
+                    pool = tileSet.flat;
+                    rotationSteps = 0;
+                }
+
+                if (pool == null || pool.Length == 0)
+                    continue;
+
+                GameObject prefab = pool[Random.Range(0, pool.Length)];
+                result.Add((prefab, rotationSteps * 90f));
             }
 
-            if (pool == null || pool.Length == 0)
-                return null;
-
-            rotationY = rotationSteps * 90f;
-            return pool[Random.Range(0, pool.Length)];
+            return result;
         }
 
         private static GameObject[] GetRolePool(TerrainAutoTileSet tileSet, AutoTileShape shape)
