@@ -47,9 +47,7 @@ namespace TileWorldCreator
                     Layer currentLayer = availableLayers[selectedLayerIndex];
                     if (currentLayer != null)
                     {
-                        EditorGUILayout.LabelField(
-                            $"Y: {currentLayer.transform.position.y:F1}",
-                            EditorStyles.miniLabel);
+                        EditorGUILayout.LabelField($"Y: {currentLayer.transform.position.y:F1}", EditorStyles.miniLabel);
                     }
                 }
             }
