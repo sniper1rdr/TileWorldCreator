@@ -150,10 +150,14 @@ namespace TileWorldCreator
         /// corner overlay for every diagonal corner that needs one - Outer
         /// Corner where its 2 adjacent sides are both open (a convex corner),
         /// or Inner Corner where both adjacent sides connect but the diagonal
-        /// neighbour itself is missing (a concave notch). This naturally
-        /// covers every possible neighbour configuration with no gaps: an
-        /// isolated tile (no neighbours at all) gets all 4 edges + all 4 outer
-        /// corners layered on top of its Flat base.
+        /// neighbour itself is missing (a concave notch). An edge is skipped
+        /// whenever BOTH corners at its 2 ends already get an Outer Corner
+        /// piece, since those already close off that whole side and a
+        /// separate edge there would just duplicate/overlap them. This
+        /// naturally covers every possible neighbour configuration with no
+        /// gaps: an isolated tile (no neighbours at all) gets only its 4
+        /// Outer Corner pieces (no edges - each side's both corners trigger,
+        /// so every edge is redundant) layered on top of its Flat base.
         ///
         /// orthoMask must be computed from the 4 orthogonal same-type
         /// neighbours, cornerMask from the 4 diagonal same-type neighbours.
@@ -169,9 +173,26 @@ namespace TileWorldCreator
                 kind = AutoTilePieceKind.Base
             });
 
+            // Figure out which diagonal corners will get an Outer Corner piece
+            // first (both adjacent sides open), so edges that would be fully
+            // covered by 2 such corners at both their ends can be skipped -
+            // otherwise an isolated tile ends up with both 4 edges AND 4
+            // corners stacked on top of each other (redundant, looks wrong).
+            var outerCornerAt = new Dictionary<TileCorner, bool>();
+            foreach (var def in CornerDefs)
+            {
+                bool sideAOpen = (orthoMask & def.sideA) == 0;
+                bool sideBOpen = (orthoMask & def.sideB) == 0;
+                outerCornerAt[def.corner] = sideAOpen && sideBOpen;
+            }
+
             foreach (TileSide side in AllSides)
             {
                 if ((orthoMask & side) != 0) continue; // has a neighbour there - no edge needed
+
+                var flanks = FlankingCorners(side);
+                if (outerCornerAt[flanks.a] && outerCornerAt[flanks.b])
+                    continue; // both ends already covered by an Outer Corner piece - edge would be redundant
 
                 int steps = FindSideRotation(StraightEdgeBase, TileSide.All & ~side);
                 pieces.Add(new AutoTilePiece
@@ -188,7 +209,7 @@ namespace TileWorldCreator
                 bool sideAOpen = (orthoMask & def.sideA) == 0;
                 bool sideBOpen = (orthoMask & def.sideB) == 0;
 
-                if (sideAOpen && sideBOpen)
+                if (outerCornerAt[def.corner])
                 {
                     int steps = FindSideRotation(OuterCornerBase, TileSide.All & ~(def.sideA | def.sideB));
                     pieces.Add(new AutoTilePiece
@@ -213,6 +234,19 @@ namespace TileWorldCreator
             }
 
             return pieces.ToArray();
+        }
+
+        /// <summary>The 2 diagonal corners that sit at the 2 ends of a given orthogonal side.</summary>
+        private static (TileCorner a, TileCorner b) FlankingCorners(TileSide side)
+        {
+            switch (side)
+            {
+                case TileSide.North: return (TileCorner.NW, TileCorner.NE);
+                case TileSide.East: return (TileCorner.NE, TileCorner.SE);
+                case TileSide.South: return (TileCorner.SE, TileCorner.SW);
+                case TileSide.West: return (TileCorner.SW, TileCorner.NW);
+                default: return (TileCorner.None, TileCorner.None);
+            }
         }
 
         private static int FindSideRotation(TileSide baseMask, TileSide targetMask)
