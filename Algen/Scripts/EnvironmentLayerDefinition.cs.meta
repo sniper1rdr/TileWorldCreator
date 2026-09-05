@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 161490caed88f744eb2e9c465d7803c9
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 393798
+  packageName: Aglen Realms - World Core
+  packageVersion: 1.0.1
+  assetPath: Assets/Aglen Realms - World Core/Runtime/Scripts/EnvironmentLayerDefinition.cs
+  uploadId: 969106

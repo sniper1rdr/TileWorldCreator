@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: ab511765418f5054d8398cf1ec5d2718
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 393798
+  packageName: Aglen Realms - World Core
+  packageVersion: 1.0.1
+  assetPath: Assets/Aglen Realms - World Core/Editor/Scripts/StubPaletteSources.cs
+  uploadId: 969106

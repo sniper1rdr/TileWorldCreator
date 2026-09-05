@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 6f031f6bb0ea0a14e8be8ef379ad7cab
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 393798
+  packageName: Aglen Realms - World Core
+  packageVersion: 1.0.1
+  assetPath: Assets/Aglen Realms - World Core/Editor/Scripts/PaletteView.cs
+  uploadId: 969106

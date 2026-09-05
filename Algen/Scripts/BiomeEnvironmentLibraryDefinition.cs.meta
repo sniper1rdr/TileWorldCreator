@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: a4ee4d96886f6ac4db73b3c818e75d03
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 393798
+  packageName: Aglen Realms - World Core
+  packageVersion: 1.0.1
+  assetPath: Assets/Aglen Realms - World Core/Runtime/Scripts/BiomeEnvironmentLibraryDefinition.cs
+  uploadId: 969106

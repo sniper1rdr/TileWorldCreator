@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 0e4519b7e06e08c41afd36d080024104
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 393798
+  packageName: Aglen Realms - World Core
+  packageVersion: 1.0.1
+  assetPath: Assets/Aglen Realms - World Core/Editor/Scripts/WorldCoreEditorMode.cs
+  uploadId: 969106

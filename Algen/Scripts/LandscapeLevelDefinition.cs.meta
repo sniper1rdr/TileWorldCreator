@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: b8d4f9a25c3e4a7b8d1f0e6c9a2b5d4e
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 393798
+  packageName: Aglen Realms - World Core
+  packageVersion: 1.0.1
+  assetPath: Assets/Aglen Realms - World Core/Runtime/Scripts/LandscapeLevelDefinition.cs
+  uploadId: 969106

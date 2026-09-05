@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: eb22f7d13aaf0c64eb49d44648cb2d8e
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 393798
+  packageName: Aglen Realms - World Core
+  packageVersion: 1.0.1
+  assetPath: Assets/Aglen Realms - World Core/Runtime/Scripts/BiomeDefinition.cs
+  uploadId: 969106

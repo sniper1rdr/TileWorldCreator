@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 832582b1f13ebbe4095a1a310babf3a4
+AssemblyDefinitionImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 393798
+  packageName: Aglen Realms - World Core
+  packageVersion: 1.0.1
+  assetPath: Assets/Aglen Realms - World Core/Editor/AglenRealms.WorldCore.Editor.asmdef
+  uploadId: 969106

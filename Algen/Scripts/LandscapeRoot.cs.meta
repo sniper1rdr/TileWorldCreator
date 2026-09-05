@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 85dd1c9e9ca5d5b40ab088150fe19dab
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 393798
+  packageName: Aglen Realms - World Core
+  packageVersion: 1.0.1
+  assetPath: Assets/Aglen Realms - World Core/Runtime/Scripts/LandscapeRoot.cs
+  uploadId: 969106

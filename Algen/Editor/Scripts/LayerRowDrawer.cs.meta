@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: cb2b27790fbd3be449d3f89906cb0ffe
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 393798
+  packageName: Aglen Realms - World Core
+  packageVersion: 1.0.1
+  assetPath: Assets/Aglen Realms - World Core/Editor/Scripts/LayerRowDrawer.cs
+  uploadId: 969106
