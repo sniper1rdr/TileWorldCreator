@@ -41,6 +41,9 @@ namespace TileWorldCreator
         private bool isMouseDown = false;
         private float lastPaintTime = 0f;
         private HashSet<Vector3Int> paintedCellsInSession = new HashSet<Vector3Int>();
+
+        // Кэшированный материал для подсветки (чтобы не выделять память каждый кадр)
+        private Material highlightMaterial;
         
         // ============ PUBLIC METHODS ============
         
@@ -153,6 +156,13 @@ namespace TileWorldCreator
             lastPaintedCell = new Vector3Int(-999, -999, -999);
             isMouseDown = false;
             paintedCellsInSession.Clear();
+
+            // Очистим кэшированный материал
+            if (highlightMaterial != null)
+            {
+                Object.DestroyImmediate(highlightMaterial);
+                highlightMaterial = null;
+            }
         }
         
         // ============ PRIVATE METHODS ============
@@ -183,13 +193,24 @@ namespace TileWorldCreator
             highlight.transform.position = worldPos;
             highlight.transform.rotation = Quaternion.Euler(90, 0, 0);
 
-            Vector3 cellSize = targetLayer.Grid.cellSize;
+            Vector3 cellSize = Vector3.one;
+            if (targetLayer.Grid != null)
+                cellSize = targetLayer.Grid.cellSize;
+
             highlight.transform.localScale = new Vector3(cellSize.x, cellSize.z, 1);
 
             Renderer renderer = highlight.GetComponent<Renderer>();
-            Material mat = new Material(Shader.Find("Unlit/Color"));
-            mat.color = valid ? validColor : invalidColor;
-            renderer.sharedMaterial = mat;
+
+            if (highlightMaterial == null)
+            {
+                Shader shader = Shader.Find("Unlit/Color");
+                highlightMaterial = new Material(shader ?? Shader.Find("Sprites/Default"));
+                highlightMaterial.hideFlags = HideFlags.HideAndDontSave;
+            }
+
+            // Меняем цвет кэширующегося материала
+            highlightMaterial.color = valid ? validColor : invalidColor;
+            renderer.sharedMaterial = highlightMaterial;
 
             highlight.hideFlags = HideFlags.HideAndDontSave;
             highlightedObjects.Add(highlight);
@@ -241,46 +262,58 @@ namespace TileWorldCreator
                 {
                     tilePrefab = currentBiome.GetRandomTile(currentTileType);
                 }
-                
+
                 if (tilePrefab != null)
                 {
-                    // Создаем через Layer
-                    Tile tile = targetLayer.CreateTile(cellPosition, currentTileType);
-                    
-                    if (tile != null)
+                    // Создаем через Layer, но CreateTile создаёт временный плэйсхолдер — удаляем его
+                    Tile placeholder = targetLayer.CreateTile(cellPosition, currentTileType);
+                    if (placeholder != null)
                     {
-                        GameObject tileGO = tile.gameObject;
-                        Vector3 localPos = tileGO.transform.localPosition;
-                        Vector3 localScale = tileGO.transform.localScale;
-                        
-                        Object.DestroyImmediate(tileGO);
-                        
+                        // Удаляем плэйсхолдер из списка слоёв чтобы не оставить null/дубликат
+                        if (targetLayer.Tiles.Contains(placeholder))
+                            targetLayer.Tiles.Remove(placeholder);
+
 #if UNITY_EDITOR
-                        GameObject newTile = PrefabUtility.InstantiatePrefab(tilePrefab) as GameObject;
-                        if (newTile == null)
-                            newTile = Object.Instantiate(tilePrefab);
-#else
-                        GameObject newTile = Object.Instantiate(tilePrefab);
+                        if (!Application.isPlaying)
+                            UnityEditor.Undo.DestroyObjectImmediate(placeholder.gameObject);
+                        else
 #endif
-                        newTile.transform.SetParent(targetLayer.transform, false);
-                        newTile.transform.localPosition = localPos;
-                        newTile.transform.localScale = localScale;
-                        newTile.name = $"Tile_{cellPosition.x}_{cellPosition.z}";
-                        
-                        Tile tileComponent = newTile.GetComponent<Tile>();
-                        if (tileComponent == null)
-                            tileComponent = newTile.AddComponent<Tile>();
-                        tileComponent.Initialize(cellPosition, currentTileType);
-                        
-                        if (!targetLayer.Tiles.Contains(tileComponent))
-                        {
-                            targetLayer.Tiles.Add(tileComponent);
-                        }
+                            Object.Destroy(placeholder.gameObject);
+                    }
+
+#if UNITY_EDITOR
+                    GameObject newTile = PrefabUtility.InstantiatePrefab(tilePrefab) as GameObject;
+                    if (newTile == null)
+                        newTile = Object.Instantiate(tilePrefab);
+                    Undo.RegisterCreatedObjectUndo(newTile, "Place Tile");
+#else
+                    GameObject newTile = Object.Instantiate(tilePrefab);
+#endif
+
+                    newTile.transform.SetParent(targetLayer.transform, false);
+                    // Выставляем позицию точно в клетке
+                    Vector3 localPos = targetLayer.GetTileWorldPosition(cellPosition);
+                    // Convert to local
+                    Vector3 local = targetLayer.transform.InverseTransformPoint(localPos);
+                    newTile.transform.localPosition = local;
+                    newTile.name = $"Tile_{cellPosition.x}_{cellPosition.z}";
+
+                    Tile tileComponent = newTile.GetComponent<Tile>();
+                    if (tileComponent == null)
+                        tileComponent = newTile.AddComponent<Tile>();
+                    tileComponent.Initialize(cellPosition, currentTileType);
+
+                    if (!targetLayer.Tiles.Contains(tileComponent))
+                    {
+                        targetLayer.Tiles.Add(tileComponent);
                     }
                 }
                 else
                 {
-                    targetLayer.CreateTile(cellPosition, "Default");
+                    // Если нет префаба - создаём простую заглушку
+                    Tile t = targetLayer.CreateTile(cellPosition, "Default");
+                    if (t != null && !targetLayer.Tiles.Contains(t))
+                        targetLayer.Tiles.Add(t);
                 }
             }
         }
@@ -360,7 +393,9 @@ namespace TileWorldCreator
             Vector3 worldPos = targetLayer.transform.TransformPoint(localPos);
             worldPos.y = targetLayer.transform.position.y;
             
-            float cellSize = targetLayer.Grid.cellSize.x;
+            float cellSize = 1f;
+            if (targetLayer.Grid != null)
+                cellSize = targetLayer.Grid.cellSize.x;
             float checkRadius = cellSize * 0.3f;
             
             foreach (GameObject obj in envRoot.EnvironmentObjects)
